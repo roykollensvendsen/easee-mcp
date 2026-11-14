@@ -56,3 +56,9 @@ name = "an unknown period is asked about never guessed"
 file = "src/easee_mcp/answers.py"
 find = 'if period not in PERIODS:'
 replace = 'if False:'
+
+[[rule]]
+name = "every tool answers with a sentence even when it fails"
+file = "src/easee_mcp/server.py"
+find = 'except Exception as failure:  # noqa: BLE001 - whatever broke, the voice gets a sentence'
+replace = 'except ZeroDivisionError as failure:'
