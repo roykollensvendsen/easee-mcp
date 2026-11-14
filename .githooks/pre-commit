@@ -1,0 +1,7 @@
+#!/bin/sh
+# Refuse a commit that would publish where the owner lives, their charger's ID
+# or their login. This is a convenience, not the gate: --no-verify skips it, and
+# CI scans every commit. It never reads the login; see CONTRIBUTING.md for the
+# check that does.
+root="$(git rev-parse --show-toplevel)"
+exec python3 "$root/scripts/private_data_scan.py"
