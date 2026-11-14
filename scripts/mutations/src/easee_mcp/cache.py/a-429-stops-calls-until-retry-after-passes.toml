@@ -1,0 +1,5 @@
+[[rule]]
+name = "a 429 stops calls until retry after passes"
+file = "src/easee_mcp/cache.py"
+find = 'if until is not None and now < until:'
+replace = 'if False:'

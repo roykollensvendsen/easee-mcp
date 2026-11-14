@@ -1,0 +1,5 @@
+[[rule]]
+name = "a charger name is said as one short line"
+file = "src/easee_mcp/answers.py"
+find = 'flat = " ".join\(_CONTROL.sub\(" ", name\).split\(\)\)\[:NAME_MAX\].strip\(\)'
+replace = 'flat = name'

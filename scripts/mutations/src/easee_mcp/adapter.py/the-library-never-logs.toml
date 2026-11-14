@@ -1,0 +1,5 @@
+[[rule]]
+name = "the library never logs"
+file = "src/easee_mcp/adapter.py"
+find = 'logging.getLogger\(_library\).setLevel\(logging.CRITICAL \+ 1\)'
+replace = 'logging.getLogger(_library).setLevel(logging.NOTSET)'

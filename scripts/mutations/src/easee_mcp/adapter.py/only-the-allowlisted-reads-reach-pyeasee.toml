@@ -1,0 +1,5 @@
+[[rule]]
+name = "only the allowlisted reads reach pyeasee"
+file = "src/easee_mcp/adapter.py"
+find = '"get_chargers",'
+replace = '"get_chargers", "start",'

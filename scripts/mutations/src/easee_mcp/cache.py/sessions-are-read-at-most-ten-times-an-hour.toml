@@ -1,0 +1,5 @@
+[[rule]]
+name = "sessions are read at most ten times an hour"
+file = "src/easee_mcp/cache.py"
+find = 'if len\(recent\) >= allowed:'
+replace = 'if False:'
