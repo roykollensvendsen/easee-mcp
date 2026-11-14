@@ -10,7 +10,12 @@ requires-python = ">=3.12"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 dynamic = ["version"]
-dependencies = []
+dependencies = [
+    # Exact: the read-only test reads this version's source, so a new release
+    # is taken deliberately, with that test run against it, never by drift.
+    "pyeasee==0.8.22",
+    "mcp>=2.3",
+]
 
 [project.scripts]
 easee-mcp = "easee_mcp.cli:main"
