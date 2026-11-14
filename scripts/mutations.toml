@@ -44,3 +44,15 @@ name = "sessions are read at most ten times an hour"
 file = "src/easee_mcp/cache.py"
 find = 'if len\(recent\) >= allowed:'
 replace = 'if False:'
+
+[[rule]]
+name = "a charger name is said as one short line"
+file = "src/easee_mcp/answers.py"
+find = 'flat = " ".join\(_CONTROL.sub\(" ", name\).split\(\)\)\[:NAME_MAX\].strip\(\)'
+replace = 'flat = name'
+
+[[rule]]
+name = "an unknown period is asked about never guessed"
+file = "src/easee_mcp/answers.py"
+find = 'if period not in PERIODS:'
+replace = 'if False:'
