@@ -43,9 +43,11 @@ drives every read through a pretend cloud that refuses anything else.
   and the test reads that version's source.
 - Adding a command later means changing the allowlist and this record in the
   same reviewed change, with a spoken yes for each command.
-- Worse: the state is read through pyeasee's generic GET helper, because
-  0.8.22 has no state method, so the allowlist holds one name broader than a
-  single endpoint. The static test still refuses every write helper.
+- The state and the limits are read as numbered observations
+  (`get_observations`), the way pyeasee's own tool reads them; the older
+  state read refused the owner's login on 2026-11-15.
+- Worse: an observation ID that Easee renumbers reads as unknown rather than
+  failing, so a wrong number is said as "not known", not caught by a test.
 
 ## Related
 

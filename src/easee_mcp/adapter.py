@@ -34,13 +34,30 @@ READ_ALLOWLIST: frozenset[str] = frozenset(
     {
         "connect",  # logs in; changes nothing on the charger
         "close",
-        "get",  # pyeasee's GET helper, for the state, which 0.8.22 has no method for
         "get_chargers",
-        "get_config",
+        "get_observations",  # the state and the limits, by observation ID
         "get_sessions_between_dates",
         "get_consumption_between_dates",
     }
 )
+#: Easee's observation IDs, from pyeasee's ChargerStreamData table; each is
+#: readable by an ordinary user. Nothing else is asked for, so the charger's
+#: location (observation 25) is never fetched.
+OBSERVATIONS: dict[str, int] = {
+    "circuitMaxCurrentP1": 22,
+    "circuitMaxCurrentP2": 23,
+    "circuitMaxCurrentP3": 24,
+    "maxChargerCurrent": 47,
+    "dynamicChargerCurrent": 48,
+    "reasonForNoCurrent": 96,
+    "chargerOpMode": 109,
+    "dynamicCircuitCurrentP1": 111,
+    "dynamicCircuitCurrentP2": 112,
+    "dynamicCircuitCurrentP3": 113,
+    "outputCurrent": 114,
+    "totalPower": 120,
+    "sessionEnergy": 121,
+}
 #: Seconds one read may take. The voice gives up on a tool after about 15.
 TIMEOUT = 8.0
 #: The wait to say when Easee answers 429 without saying how long.
@@ -53,6 +70,10 @@ class CloudDownError(Exception):
 
 class LoginRefusedError(Exception):
     """Easee refused the username or password."""
+
+
+class NotAllowedError(Exception):
+    """Easee logged in, and refused this login that read."""
 
 
 class SlowDownError(Exception):
@@ -77,7 +98,6 @@ class ChargerState:
     """What the charger is doing now."""
 
     op_mode: int | None
-    online: bool | None
     power_kw: float | None
     session_kwh: float | None
     output_current_a: float | None
@@ -127,10 +147,9 @@ class EaseeReader:
 
     async def state(self, charger_id: str) -> ChargerState:
         """What the charger is doing now."""
-        raw = await self._state(charger_id)
+        raw = await self._observed(charger_id)
         return ChargerState(
             op_mode=_int(raw.get("chargerOpMode")),
-            online=_bool(raw.get("isOnline")),
             power_kw=_float(raw.get("totalPower")),
             session_kwh=_float(raw.get("sessionEnergy")),
             output_current_a=_float(raw.get("outputCurrent")),
@@ -139,15 +158,13 @@ class EaseeReader:
         )
 
     async def limits(self, charger_id: str) -> Limits:
-        """The currents the charger may give, from its config and its state."""
-        charger = await self._charger(charger_id)
-        config = await self._call(lambda _: charger.get_config(raw=True))
-        raw = await self._state(charger_id)
+        """The currents the charger may give, as it reports them."""
+        raw = await self._observed(charger_id)
         phases = ("P1", "P2", "P3")
         return Limits(
-            max_charger_a=_float(config.get("maxChargerCurrent")),
+            max_charger_a=_float(raw.get("maxChargerCurrent")),
             dynamic_charger_a=_float(raw.get("dynamicChargerCurrent")),
-            circuit_max_a=_three(config.get(f"circuitMaxCurrent{p}") for p in phases),
+            circuit_max_a=_three(raw.get(f"circuitMaxCurrent{p}") for p in phases),
             dynamic_circuit_a=_three(raw.get(f"dynamicCircuitCurrent{p}") for p in phases),
         )
 
@@ -173,9 +190,12 @@ class EaseeReader:
             await self._easee.close()
             self._easee = None
 
-    async def _state(self, charger_id: str) -> dict[str, Any]:
-        path = f"/api/chargers/{charger_id}/state"
-        return dict(await self._call(lambda e: _json(e.get(path))))
+    async def _observed(self, charger_id: str) -> dict[str, Any]:
+        """The chosen observations, by name; any other Easee sends is dropped."""
+        charger = await self._charger(charger_id)
+        answer = await self._call(lambda _: charger.get_observations(*OBSERVATIONS.values()))
+        by_id = {o.get("id"): o.get("value") for o in answer.get("observations", []) if isinstance(o, dict)}
+        return {name: by_id.get(number) for name, number in OBSERVATIONS.items()}
 
     async def _charger(self, charger_id: str) -> Any:  # noqa: ANN401
         if charger_id not in self._chargers:
@@ -203,17 +223,13 @@ class EaseeReader:
                     raise LoginRefusedError from None
                 continue
             except exceptions.ForbiddenServiceException:
-                raise LoginRefusedError from None
+                raise NotAllowedError from None
             except Exception:  # noqa: BLE001 - whatever broke, the voice can only say the cloud is down
                 raise CloudDownError from None
             if answer is None:  # pyeasee's reads answer None on a server failure
                 raise CloudDownError
             return answer
         raise LoginRefusedError  # pragma: no cover - the loop always returns or raises
-
-
-async def _json(response: Awaitable[Any]) -> Any:  # noqa: ANN401
-    return await (await response).json()
 
 
 def _wait(slow: Exception) -> int:
@@ -236,10 +252,6 @@ def _int(value: Any) -> int | None:  # noqa: ANN401
         return None if value is None else int(value)
     except (TypeError, ValueError):
         return None
-
-
-def _bool(value: Any) -> bool | None:  # noqa: ANN401
-    return value if isinstance(value, bool) else None
 
 
 def _three(values: Any) -> tuple[float | None, float | None, float | None]:  # noqa: ANN401
