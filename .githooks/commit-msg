@@ -21,6 +21,9 @@ python3 "$root/scripts/imperative.py" --file "$1" >/dev/null || {
     exit 1
 }
 
+# No address, charger ID or Claude session link in the message itself.
+python3 "$root/scripts/private_data_scan.py" --message "$1" || exit 1
+
 # Readability only ever warns. How long a sentence needs to be is a
 # judgement, and a gate that refuses a message nobody can shorten teaches
 # people to pass --no-verify.

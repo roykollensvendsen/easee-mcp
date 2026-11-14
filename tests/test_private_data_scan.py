@@ -3,6 +3,8 @@
 import pathlib
 import sys
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "scripts"))
 
 import private_data_scan
@@ -73,3 +75,33 @@ def test_the_tracked_tree_is_clean(tmp_path):
 
 def test_the_history_is_clean(tmp_path):
     assert _clean_run(tmp_path, "--history") == 0
+
+
+# Built at run time, so this file does not itself hold what it forbids.
+SESSION_LINK = "https://claude.ai/code/" + "session_01AbCd"
+TRAILER = "Claude-" + "Session:"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        f"feat: Add a thing\n\nBody.\n\n{TRAILER} {SESSION_LINK}\n",
+        f"fix: Mend it\n\n{TRAILER.lower()} {SESSION_LINK}\n",  # however it is written
+        f"docs: Note\n\nSee {SESSION_LINK} for how it went.\n",
+    ],
+)
+def test_a_link_to_a_claude_session_is_never_committed(message):
+    assert private_data_scan.offences(message, set())
+
+
+def test_attribution_and_ordinary_mentions_of_claude_pass():
+    text = "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nThe app reaches it through claude.ai."
+    assert private_data_scan.offences(text, set()) == []
+
+
+def test_a_commit_message_is_scanned_before_it_is_kept(tmp_path):
+    message = tmp_path / "COMMIT_EDITMSG"
+    message.write_text(f"feat: One\n\n{TRAILER} {SESSION_LINK}\n# a comment git drops\n")
+    assert private_data_scan.main(["--message", str(message), "--words", str(tmp_path / "none.toml")]) == 1
+    message.write_text("feat: One\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n")
+    assert private_data_scan.main(["--message", str(message), "--words", str(tmp_path / "none.toml")]) == 0
