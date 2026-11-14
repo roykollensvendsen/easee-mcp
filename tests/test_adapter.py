@@ -11,6 +11,7 @@ from easee_mcp.adapter import (
     CloudDownError,
     EaseeReader,
     LoginRefusedError,
+    NotAllowedError,
     SlowDownError,
     mask,
 )
@@ -51,7 +52,6 @@ def test_the_state_says_what_the_charger_is_doing():
     cloud = FakeEaseeCloud()
     state = _run(_with(_reader(cloud), lambda r: r.state(FAKE_CHARGER_ID)))
     assert state.op_mode == 3
-    assert state.online is True
     assert (state.power_kw, state.session_kwh) == (7.2, 12.4)
     assert (state.output_current_a, state.dynamic_current_a) == (10.0, 16.0)
 
@@ -102,7 +102,27 @@ def test_a_429_is_never_retried():
     cloud = FakeEaseeCloud(retry_after=60)
     with pytest.raises(SlowDownError):
         _run(_with(_reader(cloud), lambda r: r.state(FAKE_CHARGER_ID)))
-    assert [p for m, p in cloud.requests if m == "GET"] == [f"/api/chargers/{FAKE_CHARGER_ID}/state"]
+    assert len([p for m, p in cloud.requests if m == "GET"]) == 1
+
+
+def test_the_state_and_limits_come_from_one_read_of_the_observations():
+    cloud = FakeEaseeCloud()
+
+    async def both(reader):
+        await reader.chargers()
+        await reader.limits(FAKE_CHARGER_ID)
+
+    _run(_with(_reader(cloud), both))
+    reads = [p for m, p in cloud.requests if m == "GET"]
+    assert reads == ["/api/chargers", f"/state/{FAKE_CHARGER_ID}/observations"]
+
+
+def test_a_read_easee_forbids_is_said_as_not_allowed():
+    cloud = FakeEaseeCloud()
+    cloud.observations = {}
+    cloud.forbid_observations = True
+    with pytest.raises(NotAllowedError):
+        _run(_with(_reader(cloud), lambda r: r.state(FAKE_CHARGER_ID)))
 
 
 def test_a_cloud_that_cannot_be_reached_is_said_as_down():
@@ -142,7 +162,7 @@ def test_the_home_address_never_leaves_the_adapter():
         ]
 
     out = repr(_run(_with(_reader(cloud), everything)))
-    for word in (FAKE_STREET, "Testby", "address", "latitude", "longitude"):
+    for word in (FAKE_STREET, "Testby", "address", "latitude", "longitude", "0.0,0.0"):
         assert word not in out
 
 

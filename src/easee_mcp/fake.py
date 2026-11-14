@@ -8,6 +8,9 @@ limits, so the plugin cannot pass here and fail there:
 * the access token lasts one hour, and a refresh token works once;
 * the charger list may be read twice a minute, and sessions and energy ten
   times an hour each; past that it answers 429 with ``Retry-After``;
+* the charger's state and limits come as observations, by number; the older
+  state read is not served, as the real one refused the owner's login on
+  2026-11-15;
 * it carries a made-up street address and coordinates beside the charger, as
   Easee's site records do, so a test can prove they never come out.
 
@@ -22,7 +25,7 @@ import datetime as dt
 import json
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 #: The made-up charger every test and the simulated mode use.
 FAKE_CHARGER_ID = "EHTEST01"
@@ -85,13 +88,14 @@ class FakeEaseeCloud:
     """The service itself: answers requests and counts them."""
 
     now: Any = field(default=lambda: dt.datetime.now(dt.UTC))
-    #: The charger's state, as GET /api/chargers/{id}/state gives it.
-    state: dict[str, Any] = field(default_factory=lambda: _state())  # noqa: PLW0108 - defined below
-    config: dict[str, Any] = field(default_factory=lambda: _config())  # noqa: PLW0108 - defined below
+    #: The charger's observations by ID, as GET /state/{id}/observations gives them.
+    observations: dict[int, Any] = field(default_factory=lambda: _observations())  # noqa: PLW0108 - defined below
     #: Each session as (connected, disconnected or None, kWh).
     sessions: list[tuple[dt.datetime, dt.datetime | None, float]] = field(default_factory=list)
     #: The kWh a total-energy question answers.
     energy_kwh: float = 42.5
+    #: True answers the observations read with 403.
+    forbid_observations: bool = False
     #: Set to a number of seconds to answer every read with 429.
     retry_after: int | None = None
     #: Each request as (method, path).
@@ -112,7 +116,7 @@ class FakeEaseeCloud:
 
     def answer(self, method: str, url: str, headers: dict[str, str], body: Any) -> FakeResponse:  # noqa: ANN401
         """What the service says to one request."""
-        path = urlsplit(url).path
+        path, query = urlsplit(url).path, urlsplit(url).query
         self.requests.append((method, path))
         if method == "POST" and path == LOGIN:
             return self._login(body)
@@ -132,7 +136,7 @@ class FakeEaseeCloud:
         limited = self._over_limit(path)
         if limited is not None:
             return self._slow_down(limited)
-        return self._read(path)
+        return self._read(path, query)
 
     def _login(self, body: dict[str, str]) -> FakeResponse:
         if body != {"userName": FAKE_USER, "password": FAKE_PASSWORD}:
@@ -173,19 +177,29 @@ class FakeEaseeCloud:
         headers["Retry-After"] = str(seconds)
         return FakeResponse(429, {"title": "Too many requests"}, headers)
 
-    def _read(self, path: str) -> FakeResponse:
-        base = f"/api/chargers/{FAKE_CHARGER_ID}"
+    def _read(self, path: str, query: str) -> FakeResponse:
         if path == "/api/chargers":
             return FakeResponse(200, [_charger_record()], _json_headers())
-        if path == f"{base}/state":
-            return FakeResponse(200, {**self.state, **_place()}, _json_headers())
-        if path == f"{base}/config":
-            return FakeResponse(200, {**self.config, **_place()}, _json_headers())
+        if path == f"/state/{FAKE_CHARGER_ID}/observations":
+            if self.forbid_observations:
+                return FakeResponse(403, {"title": "Forbidden"}, _json_headers())
+            return self._observed(query)
         if path.startswith(f"/api/sessions/charger/{FAKE_CHARGER_ID}/sessions/"):
             return FakeResponse(200, self._session_records(), _json_headers())
         if path.startswith(f"/api/sessions/charger/{FAKE_CHARGER_ID}/total/"):
             return FakeResponse(200, str(self.energy_kwh), _Headers({"Content-Type": "text/plain"}))
         return FakeResponse(404, {"title": "Not found"}, _json_headers())
+
+    def _observed(self, query: str) -> FakeResponse:
+        asked = {int(i) for i in parse_qs(query).get("ids", [""])[0].split(",") if i}
+        found = [
+            {"id": key, "value": value, "timestamp": self.now().isoformat()}
+            for key, value in self.observations.items()
+            if key in asked
+        ]
+        return FakeResponse(
+            200, {"chargerId": FAKE_CHARGER_ID, "observations": found, **_place()}, _json_headers()
+        )
 
     def _session_records(self) -> list[dict[str, Any]]:
         return [
@@ -252,28 +266,21 @@ def _charger_record() -> dict[str, Any]:
     }
 
 
-def _state() -> dict[str, Any]:
-    """A car connected and charging at 7.2 kW, as the state endpoint describes it."""
+def _observations() -> dict[int, Any]:
+    """A car connected and charging at 7.2 kW, by Easee's observation IDs."""
     return {
-        "chargerOpMode": 3,
-        "isOnline": True,
-        "totalPower": 7.2,
-        "sessionEnergy": 12.4,
-        "outputCurrent": 10.0,
-        "dynamicChargerCurrent": 16.0,
-        "dynamicCircuitCurrentP1": 32.0,
-        "dynamicCircuitCurrentP2": 32.0,
-        "dynamicCircuitCurrentP3": 32.0,
-        "reasonForNoCurrent": 0,
-        "cableLocked": True,
-    }
-
-
-def _config() -> dict[str, Any]:
-    return {
-        "maxChargerCurrent": 32.0,
-        "circuitMaxCurrentP1": 32.0,
-        "circuitMaxCurrentP2": 32.0,
-        "circuitMaxCurrentP3": 32.0,
-        "isEnabled": True,
+        109: 3,  # chargerOpMode: charging
+        120: 7.2,  # totalPower, kW
+        121: 12.4,  # sessionEnergy, kWh
+        114: 10.0,  # outputCurrent, A
+        48: 16.0,  # dynamicChargerCurrent, A
+        47: 32.0,  # maxChargerCurrent, A
+        22: 32.0,  # circuitMaxCurrentP1..P3, A
+        23: 32.0,
+        24: 32.0,
+        111: 32.0,  # dynamicCircuitCurrentP1..P3, A
+        112: 32.0,
+        113: 32.0,
+        96: 0,  # reasonForNoCurrent
+        25: f"{FAKE_LATITUDE},{FAKE_LONGITUDE}",  # location, which must never come out
     }
