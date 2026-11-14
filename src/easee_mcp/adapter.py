@@ -116,6 +116,14 @@ class Limits:
 
 
 @dataclass(frozen=True)
+class Reading:
+    """The state and the limits, from one read."""
+
+    state: ChargerState
+    limits: Limits
+
+
+@dataclass(frozen=True)
 class Session:
     """One charging session: when the car came and went, and the energy."""
 
@@ -145,28 +153,18 @@ class EaseeReader:
         self._chargers = {c.id: c for c in found}
         return [ChargerRef(id=str(c.id), name=str(c.name)) for c in found]
 
+    async def reading(self, charger_id: str) -> Reading:
+        """The state and the limits, from one read of the observations."""
+        raw = await self._observed(charger_id)
+        return Reading(state=_state(raw), limits=_limits(raw))
+
     async def state(self, charger_id: str) -> ChargerState:
         """What the charger is doing now."""
-        raw = await self._observed(charger_id)
-        return ChargerState(
-            op_mode=_int(raw.get("chargerOpMode")),
-            power_kw=_float(raw.get("totalPower")),
-            session_kwh=_float(raw.get("sessionEnergy")),
-            output_current_a=_float(raw.get("outputCurrent")),
-            dynamic_current_a=_float(raw.get("dynamicChargerCurrent")),
-            reason_for_no_current=_int(raw.get("reasonForNoCurrent")),
-        )
+        return _state(await self._observed(charger_id))
 
     async def limits(self, charger_id: str) -> Limits:
         """The currents the charger may give, as it reports them."""
-        raw = await self._observed(charger_id)
-        phases = ("P1", "P2", "P3")
-        return Limits(
-            max_charger_a=_float(raw.get("maxChargerCurrent")),
-            dynamic_charger_a=_float(raw.get("dynamicChargerCurrent")),
-            circuit_max_a=_three(raw.get(f"circuitMaxCurrent{p}") for p in phases),
-            dynamic_circuit_a=_three(raw.get(f"dynamicCircuitCurrent{p}") for p in phases),
-        )
+        return _limits(await self._observed(charger_id))
 
     async def sessions(self, charger_id: str, start: dt.datetime, end: dt.datetime) -> list[Session]:
         """The charging sessions between two times, newest first."""
@@ -189,6 +187,8 @@ class EaseeReader:
         if self._easee is not None:
             await self._easee.close()
             self._easee = None
+        # Each charger holds the connection it was read with.
+        self._chargers = {}
 
     async def _observed(self, charger_id: str) -> dict[str, Any]:
         """The chosen observations, by name; any other Easee sends is dropped."""
@@ -238,6 +238,27 @@ def _wait(slow: Exception) -> int:
         return max(1, int(said))
     except (TypeError, ValueError):
         return DEFAULT_WAIT
+
+
+def _state(raw: dict[str, Any]) -> ChargerState:
+    return ChargerState(
+        op_mode=_int(raw.get("chargerOpMode")),
+        power_kw=_float(raw.get("totalPower")),
+        session_kwh=_float(raw.get("sessionEnergy")),
+        output_current_a=_float(raw.get("outputCurrent")),
+        dynamic_current_a=_float(raw.get("dynamicChargerCurrent")),
+        reason_for_no_current=_int(raw.get("reasonForNoCurrent")),
+    )
+
+
+def _limits(raw: dict[str, Any]) -> Limits:
+    phases = ("P1", "P2", "P3")
+    return Limits(
+        max_charger_a=_float(raw.get("maxChargerCurrent")),
+        dynamic_charger_a=_float(raw.get("dynamicChargerCurrent")),
+        circuit_max_a=_three(raw.get(f"circuitMaxCurrent{p}") for p in phases),
+        dynamic_circuit_a=_three(raw.get(f"dynamicCircuitCurrent{p}") for p in phases),
+    )
 
 
 def _float(value: Any) -> float | None:  # noqa: ANN401
