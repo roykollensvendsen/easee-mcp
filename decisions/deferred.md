@@ -12,3 +12,8 @@ read whenever a decision record is written and when a phase ends.
 | A release workflow and publishing | The first release someone outside will install | A published name is claimed and a published version cannot be reused |
 | `CODEOWNERS` | A second person who reviews | It would name one person as the owner of everything |
 | `pre-commit` as a requirement rather than an option | A second contributor | The gates run in CI, and a hook one person installs is a hook one person maintains |
+| Any command: start, stop, pause, resume, a current limit | The owner asks for it by name, after a day of read-only use | Each needs a spoken yes, a read-back and its own review; ADR-EM-001 |
+| Keeping the refresh token on disk | The command phase, or logins found to cost too much | It would be a second written secret; ADR-EM-002 |
+| The SignalR stream for live state | Polling found too slow or too costly | Its open callback sends a subscription; a reviewed change of its own |
+| Choosing between several chargers by name | A second charger on the account | The account has one; the first found is used |
+| Reasons for no current, in words | The owner asks why a car is not charging | pyeasee's table would be copied; only the number is read today |
