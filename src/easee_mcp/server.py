@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from easee_mcp.answers import ChargerAnswers
+    from easee_mcp.status import StatusFile
 
 #: The Claude app shows about this many characters of a tool before loading it.
 FIRST_LINE_MAX = 26
@@ -63,13 +64,20 @@ TOOLS = ("charger_status", "charger_current", "charger_sessions", "charger_energ
 READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True)
 
 
-def build_server(answers: ChargerAnswers, *, simulated: bool = False) -> MCPServer[Any]:
-    """The MCP server with the four charger tools, answering from ``answers``."""
+def build_server(
+    answers: ChargerAnswers, *, simulated: bool = False, status: StatusFile | None = None
+) -> MCPServer[Any]:
+    """The MCP server with the four charger tools, answering from ``answers``; ``status`` records each."""
     server: MCPServer[Any] = MCPServer(
         name="easee-simulated" if simulated else "easee",
         instructions=(SIMULATED + INSTRUCTIONS) if simulated else INSTRUCTIONS,
     )
-    guarded = _guarded(simulated=simulated)
+
+    def recorded(answer: dict[str, Any]) -> None:
+        if status is not None:
+            status.after(answer, answers.calls_left_hour())
+
+    guarded = _guarded(simulated=simulated, after=recorded)
 
     @server.tool(annotations=READ_ONLY, description=STATUS_DESCRIPTION)
     @guarded
@@ -99,7 +107,7 @@ def _failed(outcome: str, say: str) -> dict[str, Any]:
 
 
 def _guarded(
-    *, simulated: bool
+    *, simulated: bool, after: Callable[[dict[str, Any]], None]
 ) -> Callable[[Callable[..., Awaitable[dict[str, Any]]]], Callable[..., Awaitable[dict[str, Any]]]]:
     """Make a tool's failure an answer the voice can still read."""
 
@@ -121,6 +129,7 @@ def _guarded(
                     (said for kind, said in FAILURES if isinstance(failure, kind)), ("broke", BROKE)
                 )
                 answer = _failed(outcome, say)
+            after(answer)
             answer["simulated"] = simulated
             if simulated:
                 answer["say"] = "Simulated: " + answer["say"]

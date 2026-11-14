@@ -13,6 +13,7 @@ from easee_mcp.adapter import EaseeReader, NotSetUpError
 from easee_mcp.answers import ChargerAnswers
 from easee_mcp.cache import CachedCharger
 from easee_mcp.fake import FAKE_PASSWORD, FAKE_USER, FakeEaseeCloud
+from easee_mcp.status import STATUS_FILE, StatusFile
 
 #: Every verb this command has. The documentation test requires each one to
 #: appear in a worked example, so a verb cannot be added without one.
@@ -72,7 +73,10 @@ def main(argv: list[str] | None = None) -> int:
 
     from easee_mcp.server import build_server  # noqa: PLC0415
 
-    server = build_server(_answers(simulate=args.simulate, login_dir=args.login_dir), simulated=args.simulate)
+    # The simulation leaves nothing behind, so it writes no status file.
+    status_file = None if args.simulate else StatusFile(STATUS_FILE.expanduser(), now=_now)
+    answers = _answers(simulate=args.simulate, login_dir=args.login_dir)
+    server = build_server(answers, simulated=args.simulate, status=status_file)
     if args.command == "status":
         result = asyncio.run(server.call_tool("charger_status", {}))
         answer = result.structured_content if isinstance(result, CallToolResult) else None

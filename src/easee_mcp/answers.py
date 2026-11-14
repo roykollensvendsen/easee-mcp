@@ -59,6 +59,10 @@ class ChargerAnswers:
         self._charger = charger
         self._tz = tz
 
+    def calls_left_hour(self) -> int:
+        """Reads left this hour on the tighter of Easee's hourly limits."""
+        return self._charger.calls_left_hour()
+
     async def status(self) -> dict[str, Any]:
         """Is it charging, how fast, how much this session, and the limit."""
         name = one_line((await self._charger.which()).name)
@@ -71,6 +75,7 @@ class ChargerAnswers:
             say += f" at {state.power_kw:.1f} kW"
         if state.session_kwh is not None:
             say += f", {state.session_kwh:.1f} kWh this session"
+        seen = say.split(",")[0]
         say += "."
         if limit is not None and (top is None or limit < top):
             say += f" It is limited to {limit:.0f} A."
@@ -78,6 +83,7 @@ class ChargerAnswers:
             "success": True,
             "outcome": "ok",
             "say": say + _age(got.age_seconds),
+            "seen": seen,
             "charging": charging,
             "op_mode": state.op_mode,
             "power_kw": state.power_kw,
