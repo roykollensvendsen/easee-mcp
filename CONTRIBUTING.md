@@ -25,8 +25,22 @@ because they are the same lines:
 ```
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src
+python scripts/private_data_scan.py --tracked --history
 uv run pytest -q --cov
 committed --no-merge-commit origin/main..HEAD
+```
+
+The private-data scan refuses a home-network address, a street address, exact
+coordinates and anything shaped like a real Easee charger ID; examples use the
+made-up `EHTEST01`. On your own machine it also refuses each word in
+`~/.config/easee-mcp/private.toml`, a list kept outside the repository, such as
+your charger's own name. Before the first push, run it once with your login as
+well. It is the one check that reads the login, so no hook does it for you:
+
+<!-- not run: it reads the owner's own login, which no test may do -->
+```
+python3 scripts/private_data_scan.py --history \
+    --secret-file ~/.config/easee-mcp/user --secret-file ~/.config/easee-mcp/password
 ```
 
 Run them after the last edit, not before it. A file edited after the format
