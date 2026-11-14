@@ -21,8 +21,6 @@ jobs:
   commits:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Dependabot writes a body line carrying two full commit hashes, which no
-    # length rule survives, and its messages are not a person's to fix.
     # A direct push to main was linted by nothing: the range below only exists
     # on a pull request, so the job skipped itself and the local hook, which
     # --no-verify bypasses, was the only check. The range is now worked out for
@@ -98,3 +96,21 @@ jobs:
         # Coverage is measured and printed, with no threshold yet: a number
         # picked before there is data is a guess with a gate on it.
         run: uv run pytest -q -p no:cacheprovider --strict-markers --cov
+
+  # Each marked rule switched off in turn: the test named after it has to go
+  # red, or the rule is guarded by nothing. One Python version is enough, since
+  # this asks whether the tests can fail, not whether the code runs everywhere.
+  mutation:
+    runs-on: ubuntu-latest
+    # No time limit of our own: a mutation run is never cut short, however many rules it
+    # has. Only GitHub's six-hour limit for any job remains.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+          version: "0.12.13"
+          python-version: "3.13"
+      - run: uv sync --locked --all-extras
+      - name: Each rule's own test can fail
+        run: uv run python scripts/mutate.py

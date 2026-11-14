@@ -231,7 +231,8 @@ def _allowlisted() -> set[tuple[str, str]]:
     }
 
 
-def test_every_allowlisted_read_reaches_nothing_but_a_get_or_the_login():
+def test_only_the_allowlisted_reads_reach_pyeasee():
+    # Every allowlisted read reaches nothing but a GET or the login.
     assert wire_writes_reached(_allowlisted(), LOGIN_PATHS) == []
 
 
