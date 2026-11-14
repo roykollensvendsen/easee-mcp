@@ -15,6 +15,11 @@ are what hold it, in three layers:
    nothing: in 0.8.22 ``force_update_opmode`` posts a command.
 3. What goes on the wire: every read is driven through the pretend cloud,
    which refuses anything but a GET and the login, and keeps what it saw.
+
+What layer 2 cannot follow: a pyeasee object held in a local variable, a call
+through ``super()``, a stored callback, or a method looked up by its name as a
+string. Layer 1 refuses the last in ``src/``; for the others inside pyeasee,
+layer 3 is the backstop, since whatever the path, the request reaches the wire.
 """
 
 from __future__ import annotations
@@ -137,6 +142,26 @@ def test_src_names_no_pyeasee_method_outside_the_read_allowlist():
         for node in ast.walk(tree)
         if isinstance(node, ast.Attribute) and node.attr in forbidden
     ]
+    assert found == []
+
+
+def test_no_pyeasee_method_is_reached_by_its_name_as_a_string():
+    # getattr(charger, "start") names no attribute, so the test above would miss it.
+    forbidden = _pyeasee_method_names() - READ_ALLOWLIST
+    found = []
+    for path, tree in _sources():
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in {"getattr", "setattr", "delattr", "hasattr"}
+                and len(node.args) >= 2  # the object, then the name
+            ):
+                continue
+            name = node.args[1]
+            literal = isinstance(name, ast.Constant) and isinstance(name.value, str)
+            if not literal or name.value in forbidden:
+                found.append(f"{path.name}:{node.lineno} {node.func.id}")
     assert found == []
 
 

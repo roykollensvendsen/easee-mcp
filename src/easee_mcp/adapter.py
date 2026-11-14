@@ -216,6 +216,9 @@ class EaseeReader:
             self._easee = pyeasee.Easee(user, password, session=self._session)
         # A 401 makes pyeasee log in again and then raise, so one more try reads
         # with the new token. A second refusal is the login itself.
+        # This second try is safe only because every call here is a read. A
+        # command must never be sent twice this way: a command that timed out
+        # or was refused is read back, never sent again.
         for attempt in range(2):
             try:
                 async with asyncio.timeout(TIMEOUT):
