@@ -26,3 +26,21 @@ name = "a 429 is never retried"
 file = "src/easee_mcp/adapter.py"
 find = 'raise SlowDownError\(_wait\(slow\)\) from None'
 replace = 'continue'
+
+[[rule]]
+name = "the state is read at most every thirty seconds"
+file = "src/easee_mcp/cache.py"
+find = '"reading", STATE_SECONDS, "state", lambda: self._reader.reading\(charger.id\)'
+replace = '"reading", 0, "state", lambda: self._reader.reading(charger.id)'
+
+[[rule]]
+name = "a 429 stops calls until retry after passes"
+file = "src/easee_mcp/cache.py"
+find = 'if until is not None and now < until:'
+replace = 'if False:'
+
+[[rule]]
+name = "sessions are read at most ten times an hour"
+file = "src/easee_mcp/cache.py"
+find = 'if len\(recent\) >= allowed:'
+replace = 'if False:'
