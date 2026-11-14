@@ -10,6 +10,9 @@ history:
 - no street address, such as a Norwegian street name followed by a number;
 - no coordinates more exact than two decimals;
 - no string shaped like an Easee charger ID, except the made-up ``EHTEST..``;
+- no link to a Claude session: a session trailer, or the address of a
+  session on claude.ai, points into one person's account, and to everyone else
+  reading this public history it is a dead link;
 - no word from the owner's private list, such as a charger's own name;
 - not the owner's Easee username or password.
 
@@ -24,6 +27,7 @@ land in a public log.
 
     python3 scripts/private_data_scan.py            # the staged files (pre-commit)
     python3 scripts/private_data_scan.py --tracked  # every tracked file
+    python3 scripts/private_data_scan.py --message .git/COMMIT_EDITMSG  # (commit-msg)
     python3 scripts/private_data_scan.py --history \
         --secret-file ~/.config/easee-mcp/user --secret-file ~/.config/easee-mcp/password
 """
@@ -55,6 +59,8 @@ COORDINATES = re.compile(r"\b(?:5[7-9]|6\d|7[0-2])\.\d{3,}\s*,\s*(?:[4-9]|[12]\d
 #: An Easee charger ID: E, a product letter, then six capitals or digits with at
 #: least one digit among them, so an ordinary capitalised word is not one.
 CHARGER_ID = re.compile(r"\bE[A-Z](?=[A-Z0-9]{0,5}\d)[A-Z0-9]{6}\b")
+#: A link into a Claude session, however the trailer is written.
+SESSION_LINK = re.compile(r"claude-session\s*:|claude\.ai/code/session_", re.IGNORECASE)
 #: The made-up IDs the fake and the tests use.
 MADE_UP_ID = re.compile(r"EHTEST\d\d")
 
@@ -82,6 +88,9 @@ def offences(text: str, private: set[str]) -> list[str]:
         for m in CHARGER_ID.finditer(text)
         if not MADE_UP_ID.fullmatch(m.group())
     ]
+    found += [
+        f"line {_line(text, m.start())}: a link to a Claude session" for m in SESSION_LINK.finditer(text)
+    ]
     lowered = text.lower()
     for value in private:
         at = lowered.find(value.lower())
@@ -99,8 +108,12 @@ def _git(*args: str) -> str:
     return done.stdout
 
 
-def _texts(*, tracked: bool, history: bool) -> list[tuple[str, str]]:
+def _texts(*, tracked: bool, history: bool, message: str | None = None) -> list[tuple[str, str]]:
     """Each place to scan, as (what it is, its text)."""
+    if message is not None:
+        # The lines git drops from a message are not part of it.
+        lines = pathlib.Path(message).read_text().splitlines()
+        return [("the commit message", "\n".join(x for x in lines if not x.startswith("#")))]
     if history:
         return [("the history", _git("log", "-p", "--all", "--no-color", "--format=commit %H%n%B"))]
     names = _git("ls-files") if tracked else _git("diff", "--cached", "--name-only", "--diff-filter=ACMR")
@@ -119,6 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--tracked", action="store_true", help="scan every tracked file")
     parser.add_argument("--history", action="store_true", help="scan every commit on every branch")
+    parser.add_argument("--message", help="scan this commit message file instead (the commit-msg hook)")
     parser.add_argument("--words", default=str(WORDS), help=f"the private list (default {WORDS})")
     parser.add_argument(
         "--secret-file",
@@ -130,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     secrets = [pathlib.Path(p).expanduser() for p in args.secret_file]
     private = private_values(pathlib.Path(args.words).expanduser(), secrets)
     bad = 0
-    for where, text in _texts(tracked=args.tracked, history=args.history):
+    for where, text in _texts(tracked=args.tracked, history=args.history, message=args.message):
         for offence in offences(text, private):
             sys.stderr.write(f"{where}, {offence}\n")
             bad += 1
