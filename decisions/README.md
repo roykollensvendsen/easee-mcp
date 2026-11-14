@@ -29,6 +29,7 @@ decision nobody writes down.
 
 | Id | Decides | Status |
 |---|---|---|
+| [ADR-EM-001](ADR-EM-001-read-only-kept-by-the-code.md) | Read-only is kept by the code, and proved by a test | Accepted |
 
 What is deliberately left undone, and what would make each worth doing, is
 [`deferred.md`](deferred.md). A thing left undone with no trigger is a thing
