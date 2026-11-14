@@ -62,3 +62,9 @@ name = "every tool answers with a sentence even when it fails"
 file = "src/easee_mcp/server.py"
 find = 'except Exception as failure:  # noqa: BLE001 - whatever broke, the voice gets a sentence'
 replace = 'except ZeroDivisionError as failure:'
+
+[[rule]]
+name = "the status file is replaced whole never written in place"
+file = "src/easee_mcp/status.py"
+find = 'pathlib.Path\(name\).replace\(self._path\)'
+replace = 'self._path.write_text(pathlib.Path(name).read_text())'

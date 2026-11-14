@@ -30,6 +30,7 @@ decision nobody writes down.
 | Id | Decides | Status |
 |---|---|---|
 | [ADR-EM-001](ADR-EM-001-read-only-kept-by-the-code.md) | Read-only is kept by the code, and proved by a test | Accepted |
+| [ADR-EM-002](ADR-EM-002-the-status-file-is-the-only-write.md) | The status file is the only file the plugin writes | Accepted |
 
 What is deliberately left undone, and what would make each worth doing, is
 [`deferred.md`](deferred.md). A thing left undone with no trigger is a thing
