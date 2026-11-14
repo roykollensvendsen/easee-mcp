@@ -1,0 +1,5 @@
+[[rule]]
+name = "the status file is replaced whole never written in place"
+file = "src/easee_mcp/status.py"
+find = 'pathlib.Path\(name\).replace\(self._path\)'
+replace = 'self._path.write_text(pathlib.Path(name).read_text())'

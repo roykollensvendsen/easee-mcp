@@ -1,0 +1,5 @@
+[[rule]]
+name = "a 429 is never retried"
+file = "src/easee_mcp/adapter.py"
+find = 'raise SlowDownError\(_wait\(slow\)\) from None'
+replace = 'continue'

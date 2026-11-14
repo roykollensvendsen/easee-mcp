@@ -1,0 +1,5 @@
+[[rule]]
+name = "an unknown period is asked about never guessed"
+file = "src/easee_mcp/answers.py"
+find = 'if period not in PERIODS:'
+replace = 'if False:'
