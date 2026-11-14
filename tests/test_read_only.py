@@ -278,3 +278,22 @@ def test_the_pretend_cloud_refuses_a_write():
     with pytest.raises(WriteRefusedError):
         asyncio.run(cloud.session().post(command))
     assert cloud.refused == [("POST", f"/api/chargers/{FAKE_CHARGER_ID}/commands/start_charging")]
+
+
+def test_every_tool_sends_only_gets_and_the_login():
+    from easee_mcp.answers import ChargerAnswers  # noqa: PLC0415 - the server is a slow import
+    from easee_mcp.cache import CachedCharger  # noqa: PLC0415
+    from easee_mcp.server import TOOLS, build_server  # noqa: PLC0415
+
+    cloud = FakeEaseeCloud()
+    reader = EaseeReader(lambda: (FAKE_USER, FAKE_PASSWORD), session=cloud.session())
+    server = build_server(ChargerAnswers(CachedCharger(reader, now=lambda: dt.datetime.now(dt.UTC))))
+
+    async def every_tool():
+        for name in TOOLS:
+            answer = (await server.call_tool(name, {})).structured_content
+            assert answer["success"] is True, name
+
+    asyncio.run(every_tool())
+    assert cloud.refused == []
+    assert {(m, p) for m, p in cloud.requests if m != "GET"} == {("POST", "/api/accounts/login")}

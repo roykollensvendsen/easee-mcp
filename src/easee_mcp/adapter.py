@@ -64,6 +64,10 @@ TIMEOUT = 8.0
 DEFAULT_WAIT = 60
 
 
+class NotSetUpError(Exception):
+    """No login is saved, so nothing may be sent."""
+
+
 class CloudDownError(Exception):
     """Easee's cloud did not answer, or answered with something unreadable."""
 
