@@ -68,3 +68,9 @@ name = "the status file is replaced whole never written in place"
 file = "src/easee_mcp/status.py"
 find = 'pathlib.Path\(name\).replace\(self._path\)'
 replace = 'self._path.write_text(pathlib.Path(name).read_text())'
+
+[[rule]]
+name = "only the allowlisted reads reach pyeasee"
+file = "src/easee_mcp/adapter.py"
+find = '"get_chargers",'
+replace = '"get_chargers", "start",'

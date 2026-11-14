@@ -30,6 +30,7 @@ for _library in ("pyeasee", "pysignalr"):
 #: The pyeasee methods this plugin may call, and nothing else. Each is a read:
 #: ``tests/test_read_only.py`` follows every one through pyeasee's own source
 #: and fails if any path reaches anything but a GET, or the login.
+# RULE: only the allowlisted reads reach pyeasee
 READ_ALLOWLIST: frozenset[str] = frozenset(
     {
         "connect",  # logs in; changes nothing on the charger
