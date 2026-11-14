@@ -14,3 +14,15 @@
 # file = "src/easee_mcp/somewhere.py"
 # find = 'if limit_exceeded:'
 # replace = 'if False:'
+
+[[rule]]
+name = "the library never logs"
+file = "src/easee_mcp/adapter.py"
+find = 'logging.getLogger\(_library\).setLevel\(logging.CRITICAL \+ 1\)'
+replace = 'logging.getLogger(_library).setLevel(logging.NOTSET)'
+
+[[rule]]
+name = "a 429 is never retried"
+file = "src/easee_mcp/adapter.py"
+find = 'raise SlowDownError\(_wait\(slow\)\) from None'
+replace = 'continue'
