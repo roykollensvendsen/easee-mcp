@@ -11,7 +11,8 @@ pytest's own sweep is not used for this: it works on a folder every project on t
 shares, and set to keep nothing it removes folders other runs are still using. Proven by
 `tests/test_no_temp_left.py`.
 
-The run also fails if a test changed the rule check's real recovery file.
+Each test also leaves the stop handlers as it found them, and the run fails if a test
+changed the rule check's real recovery file.
 """
 
 import contextlib
@@ -21,6 +22,7 @@ import pathlib
 import re
 import secrets
 import shutil
+import signal
 import stat
 import tempfile
 import time
@@ -43,7 +45,7 @@ STARTING = re.compile(re.escape(PREFIX) + r"starting-\w+")
 #: and nothing measured says how long a run killed while starting may sit before then.
 STARTING_SECONDS = 3600
 LOCK = ".lock"
-OPEN_LOCK = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW
+OPEN_LOCK = os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
 #: A sweep only opens a lock that is there: one it made would sit in a new run's folder
 #: before that run moves in, and the run's rename onto it would then fail.
 OPEN_THEIR_LOCK = os.O_RDWR | os.O_NOFOLLOW
@@ -186,3 +188,19 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
             "A test that runs scripts/mutate.py must point RECOVERY at its own temporary file."
         )
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+#: The stops `scripts/mutate.py` and `scripts/ratchet.py` handle once their `main()` runs.
+STOPS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+
+
+@pytest.fixture(autouse=True)
+def _stop_handlers_put_back():
+    """A test that runs a script's `main()` in-process would leave its handlers for every test after.
+
+    Proven by `tests/test_stop_handlers_put_back.py`.
+    """
+    before = {each: signal.getsignal(each) for each in STOPS}
+    yield
+    for each, handler in before.items():
+        signal.signal(each, handler)
