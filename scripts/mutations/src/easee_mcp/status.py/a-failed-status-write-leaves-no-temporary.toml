@@ -1,0 +1,5 @@
+[[rule]]
+name = "a failed status write leaves no temporary"
+file = "src/easee_mcp/status.py"
+find = 'pathlib\.Path\(name\)\.unlink\(missing_ok=True\)'
+replace = 'pass'

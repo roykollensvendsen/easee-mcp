@@ -63,8 +63,18 @@ class StatusFile:
         body = {"at": self._now().isoformat(), "ok": ok, "say": say[:SAY_MAX], "figures": kept}
         self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         handle, name = tempfile.mkstemp(dir=self._path.parent, prefix=".status-", suffix=".json")
-        with os.fdopen(handle, "w") as out:
-            json.dump(body, out, indent=1)
-        # RULE: the status file is replaced whole never written in place
-        pathlib.Path(name).replace(self._path)
+        try:
+            try:
+                out = os.fdopen(handle, "w")
+            except BaseException:
+                os.close(handle)
+                raise
+            with out:
+                json.dump(body, out, indent=1)
+            # RULE: the status file is replaced whole never written in place
+            pathlib.Path(name).replace(self._path)
+        except BaseException:
+            # RULE: a failed status write leaves no temporary
+            pathlib.Path(name).unlink(missing_ok=True)
+            raise
         self._last = current

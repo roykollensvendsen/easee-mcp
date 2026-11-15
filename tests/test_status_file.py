@@ -7,6 +7,9 @@ import json
 import pathlib
 import re
 
+import pytest
+
+from easee_mcp import status as status_module
 from easee_mcp.adapter import EaseeReader
 from easee_mcp.answers import ChargerAnswers
 from easee_mcp.cache import CachedCharger
@@ -129,3 +132,28 @@ def test_the_status_file_is_the_only_file_the_plugin_writes():
         }
     )
     assert writers == ["status.py"]
+
+
+def test_a_failed_status_write_leaves_no_temporary(tmp_path, monkeypatch):
+    def broken(*_, **__):
+        msg = "the disk is full"
+        raise OSError(msg)
+
+    monkeypatch.setattr(status_module.json, "dump", broken)
+    with pytest.raises(OSError, match="the disk is full"):
+        StatusFile(tmp_path / "status.json", now=lambda: AT).record(ok=True, say="x", figures={})
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_status_write_that_cannot_open_its_temporary_closes_it(tmp_path, monkeypatch):
+    def refused(*_, **__):
+        msg = "no file objects left"
+        raise OSError(msg)
+
+    closed = []
+    monkeypatch.setattr(status_module.os, "fdopen", refused)
+    monkeypatch.setattr(status_module.os, "close", closed.append)
+    with pytest.raises(OSError, match="no file objects left"):
+        StatusFile(tmp_path / "status.json", now=lambda: AT).record(ok=True, say="x", figures={})
+    assert len(closed) == 1
+    assert list(tmp_path.iterdir()) == []
