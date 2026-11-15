@@ -15,10 +15,23 @@ $ easee-mcp status --simulate
 Simulated: Garasje is charging at 7.2 kW, 12.4 kWh this session. It is limited to 16 A.
 ```
 
-For the real charger, save the Easee username and password as `user` and
-`password` in `~/.config/easee-mcp/`, readable by you alone. They are read only
-when a question is asked, and never printed or logged. The charger is found on
-the account each time the plugin starts; its ID is never written anywhere.
+For the real charger, save the Easee username and password with `easee-mcp
+login`. It asks for both without showing what you type, and saves them as `user`
+and `password` in `~/.config/easee-mcp/`, readable by you alone. It sends nothing
+to Easee; `easee-mcp status` then shows whether the login works. The login is
+read only when a question is asked, and never printed or logged. The charger is
+found on the account each time the plugin starts; its ID is never written
+anywhere.
+
+```console
+$ easee-mcp login --help
+usage: easee-mcp login [-h] [--login-dir LOGIN_DIR]
+
+options:
+  -h, --help            show this help message and exit
+  --login-dir LOGIN_DIR
+                        the folder holding 'user' and 'password' (default ~/.config/easee-mcp)
+```
 
 A voice session starts it as an MCP server over stdio:
 

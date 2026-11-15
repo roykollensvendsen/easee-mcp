@@ -1,0 +1,5 @@
+[[rule]]
+name = "an empty login is never saved"
+file = "src/easee_mcp/cli.py"
+find = '^\s*return 1$'
+replace = 'pass'

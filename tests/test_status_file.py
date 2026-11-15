@@ -112,26 +112,65 @@ def test_the_status_file_is_written_only_when_it_changes(tmp_path):
     assert path.stat().st_ino == first
 
 
-def test_the_status_file_is_the_only_file_the_plugin_writes():
-    writers = sorted(
-        {
-            path.name
-            for path in SRC.rglob("*.py")
-            for node in ast.walk(ast.parse(path.read_text()))
-            if isinstance(node, ast.Call)
-            and (
-                (isinstance(node.func, ast.Attribute) and node.func.attr in FILE_WRITES)
-                or (isinstance(node.func, ast.Name) and node.func.id in FILE_WRITES)
-                or (
-                    isinstance(node.func, ast.Attribute)
-                    and isinstance(node.func.value, ast.Name)
-                    and node.func.value.id == "os"
-                    and node.func.attr in OS_WRITES
-                )
+def _writes_in(tree):
+    """Every call in `tree` that writes a file."""
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Attribute) and node.func.attr in FILE_WRITES)
+            or (isinstance(node.func, ast.Name) and node.func.id in FILE_WRITES)
+            or (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "os"
+                and node.func.attr in OS_WRITES
             )
-        }
-    )
-    assert writers == ["status.py"]
+        )
+    ]
+
+
+#: The one place outside the status file that writes: the owner's own `easee-mcp login`,
+#: run by hand, saving the login (ADR-EM-003), through the helper it writes each file with.
+#: The server itself never calls it.
+LOGIN_WRITER = ("cli.py", ("save_login", "_write_new"))
+
+
+def test_the_status_file_is_the_only_file_the_server_writes():
+    """Outside status.py, a write may stand only inside the function the login command saves with."""
+    elsewhere = []
+    for path in SRC.rglob("*.py"):
+        tree = ast.parse(path.read_text())
+        allowed = set()
+        if path.name == LOGIN_WRITER[0]:
+            for node in tree.body:
+                if isinstance(node, ast.FunctionDef) and node.name in LOGIN_WRITER[1]:
+                    allowed |= {id(n) for n in _writes_in(node)}
+        if path.name != "status.py":
+            elsewhere += [f"{path.name}:{n.lineno}" for n in _writes_in(tree) if id(n) not in allowed]
+    assert elsewhere == []
+
+
+def test_the_server_never_saves_the_login():
+    """Serving and saying the status never reach the login writer; only the login verb does."""
+    tree = ast.parse((SRC / "easee_mcp/cli.py").read_text())
+    callers = {
+        outer.name
+        for outer in tree.body
+        if isinstance(outer, ast.FunctionDef)
+        for node in ast.walk(outer)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "save_login"
+    }
+    helpers = {
+        outer.name
+        for outer in tree.body
+        if isinstance(outer, ast.FunctionDef)
+        for node in ast.walk(outer)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_write_new"
+    }
+    assert callers == {"login"}
+    assert helpers == {"save_login"}
 
 
 def test_a_failed_status_write_leaves_no_temporary(tmp_path, monkeypatch):

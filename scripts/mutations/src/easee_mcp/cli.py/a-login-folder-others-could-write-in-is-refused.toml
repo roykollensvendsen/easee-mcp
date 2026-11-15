@@ -1,0 +1,5 @@
+[[rule]]
+name = "a login folder others could write in is refused"
+file = "src/easee_mcp/cli.py"
+find = 'raise NotYoursError\(open_to_others\)'
+replace = 'pass'
