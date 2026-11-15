@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import json
 import os
 import re
@@ -289,7 +290,36 @@ def _run(
     cwd: Path = ROOT,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, cwd=cwd, env=env, capture_output=True, text=True, check=False)  # noqa: S603
+    """Run one step, and stop it as Ctrl-C would if the ratchet is stopped while it runs.
+
+    The step gets a session of its own, so a Ctrl-C in the terminal reaches it only through
+    the ratchet, once. On a stop the step's group gets SIGINT and is waited for with no time
+    limit: a mutation run puts its source back before it ends, however long that takes. A
+    step that hangs even so is ended by hand with `kill -9 -- -<its pid>`. Its output goes
+    to temporary files, so a step with a lot to say never blocks on a full pipe.
+    """
+    with tempfile.TemporaryFile("w+") as out, tempfile.TemporaryFile("w+") as err:
+        step = subprocess.Popen(  # noqa: S603
+            command,
+            cwd=cwd,
+            env=env,
+            stdout=out,
+            stderr=err,
+            text=True,
+            # RULE: a quality step hears terminal stops only through the ratchet
+            start_new_session=True,
+        )
+        try:
+            step.wait()
+        except BaseException:
+            with contextlib.suppress(ProcessLookupError):
+                # RULE: a stopped quality run stops its step and waits for it
+                os.killpg(step.pid, signal.SIGINT)
+            step.wait()
+            raise
+        out.seek(0)
+        err.seek(0)
+        return subprocess.CompletedProcess(command, step.returncode, out.read(), err.read())
 
 
 def measure(*, skip_mutation: bool = False, recorded: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -441,21 +471,24 @@ def measure_at(ref: str) -> dict[str, Any]:
             _run("git", "worktree", "remove", "--force", str(copy))
 
 
-#: The signals that stop a run from outside: a cancelled CI job, and a closed terminal.
-STOPS = (signal.SIGTERM, signal.SIGHUP)
+#: The stops a run cleans up after: Ctrl-C, a cancelled CI job, and a closed terminal.
+STOPS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
 
 def stop_cleanly() -> None:
-    """Make a stop from outside run every `finally`, so the copies in the temporary folder go too.
+    """Make every stop from outside run every `finally`, so the copies in the temporary folder go too.
 
     CI cancels a job with SIGTERM, and a closed terminal sends SIGHUP; by default either ends
     the process at once and leaves the base's copy and its measures in the shared temporary
-    folder. Once stopping, every further stop is ignored, so the cleanup runs to its end.
+    folder. Ctrl-C raises KeyboardInterrupt, as it always does. Once stopping, every further
+    stop is ignored, so the cleanup runs to its end.
     """
 
     def stop(signum: int, _frame: object) -> None:
-        for each in (*STOPS, signal.SIGINT):
+        for each in STOPS:
             signal.signal(each, signal.SIG_IGN)
+        if signum == signal.SIGINT:
+            raise KeyboardInterrupt
         # RULE: a stopped quality run removes its copies
         raise SystemExit(128 + signum)
 
