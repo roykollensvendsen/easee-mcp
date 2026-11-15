@@ -20,6 +20,8 @@ import re
 import pytest
 
 ROOT = pathlib.Path(__file__).parent.parent
+#: Scripts whose rules hold the repository up, so they are switched off like the source's.
+OWN_SCRIPTS = (ROOT / "scripts/ratchet.py",)
 MARKER = re.compile(r"^[ \t]*#\s*RULE:\s*(.+?)\s*$")
 
 
@@ -34,7 +36,7 @@ def _mutate():
 def marked_rules() -> set[str]:
     """Every rule the source marks, by the words the marker gives it."""
     found = set()
-    for source in sorted((ROOT / "src").rglob("*.py")):
+    for source in [*sorted((ROOT / "src").rglob("*.py")), *OWN_SCRIPTS]:
         for line in source.read_text().splitlines():
             match = MARKER.search(line)
             if match:
