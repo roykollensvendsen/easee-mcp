@@ -278,6 +278,7 @@ STOPPED_MID_MUTATION = textwrap.dedent(
 
 
     mutate.run_suite, mutate.restore = measuring, slowed
+    mutate.check_the_package = lambda: None
     sys.argv = ["mutate.py"]
     sys.exit(mutate.main())
     """
@@ -323,3 +324,45 @@ def test_a_second_stop_cannot_cut_a_mutation_runs_cleanup_short(tmp_path):
     assert began == "cleaning\n", err
     assert text == "x = 1\n"
     assert not recovery_left
+
+
+def _two_checkouts(tmp_path):
+    """Two checkouts, each holding a package of the same name."""
+    here, other = tmp_path / "here", tmp_path / "other"
+    for root in (here, other):
+        (root / "src/pkg").mkdir(parents=True)
+        (root / "src/pkg/__init__.py").write_text("")
+    return here, other
+
+
+def test_a_mutation_run_refuses_a_package_from_another_checkout(tmp_path, monkeypatch, mutate):
+    """A venv shared with another worktree measures that worktree's code, and every rule looks the same."""
+    here, other = _two_checkouts(tmp_path)
+    monkeypatch.setattr(mutate, "ROOT", here)
+    monkeypatch.setenv("PYTHONPATH", str(other / "src"))
+    with pytest.raises(SystemExit, match="uv sync") as refused:
+        mutate.check_the_package()
+    assert str(other / "src/pkg") in str(refused.value)
+    assert str(here / "src") in str(refused.value)
+
+
+def test_a_package_from_this_checkout_is_measured(tmp_path, monkeypatch, mutate):
+    here, _ = _two_checkouts(tmp_path)
+    monkeypatch.setattr(mutate, "ROOT", here)
+    monkeypatch.setenv("PYTHONPATH", str(here / "src"))
+    mutate.check_the_package()
+
+
+def test_a_mutation_run_checks_the_package_before_it_measures(tmp_path, monkeypatch, mutate):
+    root, source = _one_rule(tmp_path)
+    suites = _point_at(monkeypatch, mutate, root)
+
+    def refused():
+        msg = "from another checkout"
+        raise SystemExit(msg)
+
+    monkeypatch.setattr(mutate, "check_the_package", refused)
+    with pytest.raises(SystemExit, match="another checkout"):
+        mutate.main()
+    assert suites == []
+    assert source.read_text() == "x = 1\n"
