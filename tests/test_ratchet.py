@@ -383,9 +383,56 @@ def test_a_stopped_quality_run_stops_its_step_and_waits_for_it(tmp_path):
     assert returncode == 128 + signal.SIGTERM, err
     assert marker.read_text() == "stopped by SIGINT"
     assert finished_first == "True"
+    assert "kill -9 -- -" in err  # how to end it by hand, should it hang
 
 
 def test_a_quality_step_hears_terminal_stops_only_through_the_ratchet(tmp_path):
     """In the terminal's group a Ctrl-C would reach the step twice: once itself, once from the ratchet."""
     own_session, *_ = _ratchet_stopped_in_a_step(tmp_path)
     assert own_session
+
+
+def _package_found_at(monkeypatch, where, returncode=0):
+    asked = []
+
+    def run(*command, **_):
+        asked.append(command)
+        return subprocess.CompletedProcess(command, returncode, f"{where}\n", "No module named easee_mcp")
+
+    monkeypatch.setattr(ratchet, "_run", run)
+    return asked
+
+
+def test_a_quality_run_refuses_a_package_from_another_checkout(monkeypatch, tmp_path):
+    """Measured from another worktree's source, the levels would be that worktree's."""
+    other = tmp_path / "other/src/easee_mcp/__init__.py"
+    asked = _package_found_at(monkeypatch, other)
+    with pytest.raises(SystemExit, match="uv sync") as refused:
+        ratchet.check_the_package()
+    assert str(other.parent) in str(refused.value)
+    assert str(ratchet.SOURCE) in str(refused.value)
+    assert asked == [("uv", "run", "python", "-c", "import easee_mcp; print(easee_mcp.__file__)")]
+
+
+def test_a_quality_run_measures_a_package_from_its_own_checkout(monkeypatch):
+    _package_found_at(monkeypatch, ratchet.PACKAGE / "__init__.py")
+    ratchet.check_the_package()
+
+
+def test_a_package_that_will_not_import_is_refused_too(monkeypatch):
+    _package_found_at(monkeypatch, "", returncode=1)
+    with pytest.raises(SystemExit, match="No module named easee_mcp"):
+        ratchet.check_the_package()
+
+
+def test_a_quality_run_checks_the_package_before_it_measures(monkeypatch):
+    def refused():
+        msg = "from another checkout"
+        raise SystemExit(msg)
+
+    ran = []
+    monkeypatch.setattr(ratchet, "check_the_package", refused)
+    monkeypatch.setattr(ratchet, "_run", lambda *c, **_: ran.append(c))
+    with pytest.raises(SystemExit, match="another checkout"):
+        ratchet.measure()
+    assert ran == []
