@@ -53,7 +53,16 @@ uv run ruff format --check .   # layout
 uv run mypy src                # types
 uv run pytest -q               # behaviour
 python scripts/mutate.py       # that each rule's own test can fail
+uv run python scripts/ratchet.py check --base origin/main  # that nothing got worse
 ```
+
+The last one measures coverage, the rules' own tests, the test count, lint and
+type errors, import cycles, imports that cross the layers, copied code and the
+most tangled function per module. A pull request may make none of them worse
+unless its text has a line `Ratchet-Exception: <measure> - the reason`. Main
+keeps what it measured with its own CI run, for the code-health page;
+`quality.json` holds only the suite's time budget, and no measured number is
+ever committed.
 
 `CONTRIBUTING.md` says what each one is for, and
 [`decisions/`](decisions/README.md) records the choices that shaped them,

@@ -17,3 +17,4 @@ read whenever a decision record is written and when a phase ends.
 | The SignalR stream for live state | Polling found too slow or too costly | Its open callback sends a subscription; a reviewed change of its own |
 | Choosing between several chargers by name | A second charger on the account | The account has one; the first found is used |
 | Reasons for no current, in words | The owner asks why a car is not charging | pyeasee's table would be copied; only the number is read today |
+| Mutation rows for the mutation script's own four rules | garage-door proves `scripts/mutate.py` can safely switch off its own rules, and template v8 carries it | The script that runs the mutations would be the file mutated; a fix copied before it is proven could leave a rule switched off |
