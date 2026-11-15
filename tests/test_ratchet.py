@@ -5,6 +5,7 @@ modules are counted here too, so that the code-health page can show them, and
 `tests/test_layers.py` refuses a breach outright.
 """
 
+import contextlib
 import importlib.util
 import json
 import os
@@ -298,11 +299,16 @@ def _stop_while_measuring(tmp_path, signum):
     return done, sorted(p.name for p in temp.rglob("*"))
 
 
-@pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGHUP], ids=["cancelled", "hung up"])
+@pytest.mark.parametrize(
+    "signum",
+    [signal.SIGINT, signal.SIGTERM, signal.SIGHUP],
+    ids=["interrupted", "cancelled", "hung up"],
+)
 def test_a_stopped_quality_run_removes_its_copies(tmp_path, signum):
     """CI cancels with SIGTERM and a closed terminal sends SIGHUP; both skip every `finally` by default."""
     done, left = _stop_while_measuring(tmp_path, signum)
-    assert done.returncode == 128 + signum, done.stderr
+    # Ctrl-C ends as Python ends any uncaught KeyboardInterrupt: by its own SIGINT.
+    assert done.returncode == (-signum if signum == signal.SIGINT else 128 + signum), done.stderr
     assert left == []
 
 
@@ -310,3 +316,76 @@ def test_a_second_stop_cannot_cut_the_cleanup_short(tmp_path):
     """Once stopping, further stops are ignored, so the cleanup that follows runs to its end."""
     done, _ = _stop_while_measuring(tmp_path, signal.SIGTERM)
     assert done.stdout.strip() == "True", done.stderr
+
+
+#: A step the ratchet runs: says whether it has a session of its own, then waits to be stopped.
+A_STEP = textwrap.dedent(
+    """
+    import os, pathlib, signal, sys
+    fifo, marker = sys.argv[1], pathlib.Path(sys.argv[2])
+
+
+    def stopped(*_):
+        marker.write_text("stopped by SIGINT")
+        sys.exit(0)
+
+
+    signal.signal(signal.SIGINT, stopped)
+    with open(fifo, "w") as told:
+        told.write(f"{os.getpid()} {os.getsid(0) == os.getpid()}")
+    while True:
+        signal.pause()
+    """
+)
+
+#: The ratchet, running that step; whether the step had finished when the ratchet ended.
+RATCHET_IN_A_STEP = textwrap.dedent(
+    """
+    import importlib.util, pathlib, sys
+    spec = importlib.util.spec_from_file_location("ratchet", sys.argv[1])
+    ratchet = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ratchet)
+    ratchet.stop_cleanly()
+    try:
+        ratchet._run(sys.executable, "-c", sys.argv[2], sys.argv[3], sys.argv[4])
+    finally:
+        print(pathlib.Path(sys.argv[4]).exists(), flush=True)
+    """
+)
+
+
+def _ratchet_stopped_in_a_step(tmp_path):
+    """Stop the ratchet with SIGTERM while a step runs; a hang here is a test failure, not a run's."""
+    fifo, marker = tmp_path / "told", tmp_path / "stopped"
+    os.mkfifo(fifo)
+    script = str(ROOT / "scripts/ratchet.py")
+    with subprocess.Popen(
+        [sys.executable, "-c", RATCHET_IN_A_STEP, script, A_STEP, str(fifo), str(marker)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    ) as ratchet:
+        with fifo.open() as told:
+            pid, own_session = told.read().split()
+        try:
+            ratchet.send_signal(signal.SIGTERM)
+            out, err = ratchet.communicate(timeout=30)
+        finally:
+            for each in (int(pid), ratchet.pid):
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(each, signal.SIGKILL)
+    return own_session == "True", ratchet.returncode, out.strip(), marker, err
+
+
+def test_a_stopped_quality_run_stops_its_step_and_waits_for_it(tmp_path):
+    """A step left running would go on measuring, or mutating, after the ratchet had gone."""
+    _, returncode, finished_first, marker, err = _ratchet_stopped_in_a_step(tmp_path)
+    assert returncode == 128 + signal.SIGTERM, err
+    assert marker.read_text() == "stopped by SIGINT"
+    assert finished_first == "True"
+
+
+def test_a_quality_step_hears_terminal_stops_only_through_the_ratchet(tmp_path):
+    """In the terminal's group a Ctrl-C would reach the step twice: once itself, once from the ratchet."""
+    own_session, *_ = _ratchet_stopped_in_a_step(tmp_path)
+    assert own_session
