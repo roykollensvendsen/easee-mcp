@@ -32,6 +32,7 @@ import ast
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -440,6 +441,28 @@ def measure_at(ref: str) -> dict[str, Any]:
             _run("git", "worktree", "remove", "--force", str(copy))
 
 
+#: The signals that stop a run from outside: a cancelled CI job, and a closed terminal.
+STOPS = (signal.SIGTERM, signal.SIGHUP)
+
+
+def stop_cleanly() -> None:
+    """Make a stop from outside run every `finally`, so the copies in the temporary folder go too.
+
+    CI cancels a job with SIGTERM, and a closed terminal sends SIGHUP; by default either ends
+    the process at once and leaves the base's copy and its measures in the shared temporary
+    folder. Once stopping, every further stop is ignored, so the cleanup runs to its end.
+    """
+
+    def stop(signum: int, _frame: object) -> None:
+        for each in (*STOPS, signal.SIGINT):
+            signal.signal(each, signal.SIG_IGN)
+        # RULE: a stopped quality run removes its copies
+        raise SystemExit(128 + signum)
+
+    for each in STOPS:
+        signal.signal(each, stop)
+
+
 def main() -> int:
     """Measure, or measure and compare with the base."""
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
@@ -449,6 +472,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, help="where to write the levels measured now")
     parser.add_argument("--skip-mutation", action="store_true")
     args = parser.parse_args()
+    stop_cleanly()
     if args.action == "measure":
         now = measure()
         if args.out:
