@@ -20,8 +20,10 @@ import re
 import pytest
 
 ROOT = pathlib.Path(__file__).parent.parent
-#: Scripts whose rules hold the repository up, so they are switched off like the source's.
-OWN_SCRIPTS = (ROOT / "scripts/ratchet.py",)
+#: The project's own tools, the mutation runner included: their rules are switched off like
+#: the source's. The runner has loaded its code before it switches a line off, and the suite
+#: it starts loads the switched-off file, so it can prove its own rules too.
+OWN_SCRIPTS = tuple(sorted((ROOT / "scripts").glob("*.py")))
 MARKER = re.compile(r"^[ \t]*#\s*RULE:\s*(.+?)\s*$")
 
 

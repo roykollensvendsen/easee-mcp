@@ -22,3 +22,12 @@ replace = 'if False:'
 is what replaces it, keeping the file valid. The line's own indentation is
 kept, so do not write indentation here. Two pull requests that each add a rule
 never meet here, unless they add the same one.
+
+A rule in `scripts/` is proven the same way, the mutation runner's own
+included: the runner has loaded its code before it switches a line off, and
+the suite it starts loads the switched-off file. A rule inside `repair()` could
+not be proven like this, since a killed run repairs with the switched-off code;
+keep rules out of it. This is garage-door's way.
+
+When the code marks rules and this folder has no rows, the run fails: a folder
+emptied by mistake would otherwise leave every rule unproven and the run green.
