@@ -7,7 +7,11 @@ modules are counted here too, so that the code-health page can show them, and
 
 import importlib.util
 import json
+import os
 import pathlib
+import signal
+import subprocess
+import sys
 import textwrap
 
 import pytest
@@ -261,3 +265,48 @@ def test_the_mutation_tally_is_read_from_the_mutation_scripts_last_line():
     # A run that failed for any other reason is never a full score.
     assert ratchet.mutation_tally(full, returncode=1) == {"killed": 8, "total": 9}
     assert ratchet.mutation_tally("Traceback ...", returncode=1) == {"killed": 0, "total": 1}
+
+
+STOPPED_WHILE_MEASURING = textwrap.dedent(
+    """
+    import importlib.util, os, signal, sys, tempfile
+    spec = importlib.util.spec_from_file_location("ratchet", sys.argv[1])
+    ratchet = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ratchet)
+    ratchet.stop_cleanly()
+    try:
+        with tempfile.TemporaryDirectory() as copy:
+            open(os.path.join(copy, "levels.json"), "w").close()
+            os.kill(os.getpid(), int(sys.argv[2]))
+    finally:
+        stops = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
+        print(all(signal.getsignal(s) == signal.SIG_IGN for s in stops))
+    """
+)
+
+
+def _stop_while_measuring(tmp_path, signum):
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    done = subprocess.run(
+        [sys.executable, "-c", STOPPED_WHILE_MEASURING, str(ROOT / "scripts/ratchet.py"), str(int(signum))],
+        env={**os.environ, "TMPDIR": str(temp)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return done, sorted(p.name for p in temp.rglob("*"))
+
+
+@pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGHUP], ids=["cancelled", "hung up"])
+def test_a_stopped_quality_run_removes_its_copies(tmp_path, signum):
+    """CI cancels with SIGTERM and a closed terminal sends SIGHUP; both skip every `finally` by default."""
+    done, left = _stop_while_measuring(tmp_path, signum)
+    assert done.returncode == 128 + signum, done.stderr
+    assert left == []
+
+
+def test_a_second_stop_cannot_cut_the_cleanup_short(tmp_path):
+    """Once stopping, further stops are ignored, so the cleanup that follows runs to its end."""
+    done, _ = _stop_while_measuring(tmp_path, signal.SIGTERM)
+    assert done.stdout.strip() == "True", done.stderr
