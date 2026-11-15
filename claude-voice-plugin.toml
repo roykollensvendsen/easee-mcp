@@ -1,0 +1,14 @@
+# How `claude-voice plugins install` adds this plugin. Data only: nothing here is run.
+# The format is the bridge's docs/plugin-manifest/v1.json; tests/test_plugin_manifest.py
+# checks this file against a copy of it, and against the tools the server really serves.
+manifest = 1
+name = "easee"
+command = "uv"
+args = ["run", "easee-mcp", "serve"]
+# Every one only reads: the plugin never starts, stops or changes the charger.
+tools = ["charger_status", "charger_current", "charger_sessions", "charger_energy"]
+timeout = 30
+branch = "main"
+# The login is asked by the plugin's own command, which shows nothing typed. The
+# charger is found on the account each time, so there is nothing else to fill in.
+secrets_step = "uv run easee-mcp login"
