@@ -102,6 +102,22 @@ def misfiled(folder: pathlib.Path | None = None) -> list[str]:
     return found
 
 
+#: The comment that marks a rule, and where rules are marked: the source and the project's tools.
+MARKER = re.compile(r"^[ \t]*#\s*RULE:\s*(.+?)\s*$", re.MULTILINE)
+MARKED_IN = (("src", "**/*.py"), ("scripts", "*.py"))
+
+
+def marked_sources(root: pathlib.Path | None = None) -> list[str]:
+    """The files under ``root`` that mark at least one rule, as paths from it."""
+    root = ROOT if root is None else root
+    return [
+        path.relative_to(root).as_posix()
+        for folder, pattern in MARKED_IN
+        for path in sorted((root / folder).glob(pattern))
+        if path.is_file() and MARKER.search(path.read_text())
+    ]
+
+
 def line_of(text: str, pattern: str, occurrence: int) -> int:
     """Find the one line a rule lives on, by pattern rather than by number."""
     seen = 0
@@ -170,6 +186,26 @@ def run_suite() -> tuple[int, list[str]]:
     return int(m.group(1)) if m else 0, [f.split("::")[-1].split("[")[0] for f in failed]
 
 
+def no_rows() -> int:
+    """The run's result when there are no rows: a pass only if nothing marks a rule.
+
+    A scaffolded repository starts with no rules and no rows, and passes. Rules marked
+    with no rows are different: a rows folder emptied by mistake would leave every rule
+    unproven and the run green.
+    """
+    marked = marked_sources()
+    # RULE: rules marked with no rows fail the run
+    if marked:
+        print(  # noqa: T201
+            f"nothing to switch off: {', '.join(marked)} mark rules, but {ROWS.relative_to(ROOT)}"
+            " has no rows. Restore it from main (git checkout origin/main -- scripts/mutations),"
+            " or add a row per rule."
+        )
+        return 1
+    print(f"no rules marked yet, and no rows in {ROWS.relative_to(ROOT)}")  # noqa: T201
+    return 0
+
+
 def main() -> int:
     """Mutate every rule in turn, restore the tree, and report."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -177,12 +213,9 @@ def main() -> int:
     args = parser.parse_args()
 
     repair()
-    # RULE: an empty rule table is not a crash
-    # A scaffolded repository starts with no rows.
     rules = all_rows()
     if not rules:
-        print(f"no rules in {ROWS.relative_to(ROOT)} yet; add one file per rule the code enforces")  # noqa: T201
-        return 0
+        return no_rows()
     results = []
     lost: list[str] = []
     standing: tuple[pathlib.Path, str, str] | None = None
