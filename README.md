@@ -33,6 +33,9 @@ options:
                         the folder holding 'user' and 'password' (default ~/.config/easee-mcp)
 ```
 
+`claude-voice plugins install` adds the plugin from `claude-voice-plugin.toml`,
+and names `uv run easee-mcp login` as the step only you can do.
+
 A voice session starts it as an MCP server over stdio:
 
 ```console
