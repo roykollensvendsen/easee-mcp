@@ -1,0 +1,5 @@
+[[rule]]
+name = "a failed save leaves no copy of the login"
+file = "src/easee_mcp/cli.py"
+find = 'os\.unlink\(temporary, dir_fd=folder\)'
+replace = 'pass'

@@ -1,0 +1,5 @@
+[[rule]]
+name = "the login folder is readable by its owner alone"
+file = "src/easee_mcp/cli.py"
+find = 'os\.fchmod\(held, 0o700\)'
+replace = 'pass'

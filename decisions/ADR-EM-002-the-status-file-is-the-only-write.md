@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted on the voice architect's advice, 2026-11-15.
+Accepted on the voice architect's advice, 2026-11-15. Amended by
+[ADR-EM-003](ADR-EM-003-the-owner-saves-the-login-by-hand.md): the owner's own
+`easee-mcp login` saves the login; the server still writes only the status file.
 
 ## Context
 
