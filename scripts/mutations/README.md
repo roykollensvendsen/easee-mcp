@@ -25,9 +25,13 @@ never meet here, unless they add the same one.
 
 A rule in `scripts/` is proven the same way, the mutation runner's own
 included: the runner has loaded its code before it switches a line off, and
-the suite it starts loads the switched-off file. A rule inside `repair()` could
-not be proven like this, since a killed run repairs with the switched-off code;
-keep rules out of it. This is garage-door's way.
+the suite it starts loads the switched-off file. A rule inside `repair()`, or in
+any function in the runner it calls by name, could not be proven like this,
+since a killed run repairs with the switched-off code;
+`test_no_rule_lives_inside_repair` refuses one there. This is garage-door's way.
+
+A test that runs the runner must point `RECOVERY` at its own temporary file.
+`tests/conftest.py` fails the whole run if the real recovery file changed.
 
 When the code marks rules and this folder has no rows, the run fails: a folder
 emptied by mistake would otherwise leave every rule unproven and the run green.

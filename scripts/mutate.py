@@ -189,9 +189,10 @@ def run_suite() -> tuple[int, list[str]]:
 def no_rows() -> int:
     """The run's result when there are no rows: a pass only if nothing marks a rule.
 
-    A scaffolded repository starts with no rules and no rows, and passes. Rules marked
-    with no rows are different: a rows folder emptied by mistake would leave every rule
-    unproven and the run green.
+    No rules and no rows passes. Outside a test this is hard to reach: a fresh scaffold
+    ships its own tools' rules, so it ships their rows too. Rules marked with no rows
+    fail: a rows folder emptied by mistake would leave every rule unproven and the run
+    green.
     """
     marked = marked_sources()
     # RULE: rules marked with no rows fail the run

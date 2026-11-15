@@ -94,3 +94,103 @@ def test_a_repository_with_no_rules_marked_passes_with_no_rows(tmp_path, monkeyp
     monkeypatch.setattr(mutate, "ROWS", root / "scripts/mutations")
     monkeypatch.setattr(mutate, "RECOVERY", root / "scripts/.mutate-recovery.json")
     assert mutate.main() == 0
+
+
+#: The one function whose rules cannot be proven: a killed run repairs with the code it left
+#: switched off. The way is garage-door's.
+UNPROVABLE = "repair"
+
+REPAIR_WITH_A_RULE = '''
+def repair():
+    """Put back a file a killed run left mutated."""
+    # RULE: a repaired file is the original
+    if kept:
+        write(kept)
+
+
+def sweep():
+    # RULE: a swept folder is gone
+    remove()
+'''
+
+
+def _inside_repair(text, rows, mutate):
+    """The rules marked, or switched off by a row, in `repair()` or any function it calls by name."""
+    import ast  # noqa: PLC0415
+
+    defs = (ast.FunctionDef, ast.AsyncFunctionDef)
+    functions = {f.name: f for f in ast.parse(text).body if isinstance(f, defs)}
+    assert UNPROVABLE in functions, (
+        f"no {UNPROVABLE}() in the runner; if it was renamed, rename UNPROVABLE too"
+    )
+    reached, waiting = set(), [UNPROVABLE]
+    while waiting:  # repair() and everything it calls, however deep, within this file
+        name = waiting.pop()
+        reached.add(name)
+        calls = [
+            c for c in ast.walk(functions[name]) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+        ]
+        called = {c.func.id for c in calls}
+        waiting += [c for c in called if c in functions and c not in reached]
+    lines = text.splitlines()
+    inside = {i for name in reached for i in range(functions[name].lineno - 1, functions[name].end_lineno)}
+    marked = [lines[i].split("# RULE:")[1].strip() for i in sorted(inside) if "# RULE:" in lines[i]]
+    rowed = [
+        r["name"] for r in rows if mutate.line_of(text, r["find"], int(r.get("occurrence", 1))) in inside
+    ]
+    return sorted(set(marked + rowed))
+
+
+def test_a_rule_inside_repair_is_found(mutate):
+    """The guard below is only worth something if it sees a rule where one has been put."""
+    rows = [
+        {"name": "a swept folder is gone", "find": r"^\s*remove\(\)$"},
+        {"name": "kept", "find": r"if kept:"},
+    ]
+    assert _inside_repair(REPAIR_WITH_A_RULE, rows, mutate) == ["a repaired file is the original", "kept"]
+
+
+def test_no_rule_lives_inside_repair(mutate):
+    """A killed run repairs with the code it left switched off, so a rule in repair() cannot be proven."""
+    text = (ROOT / "scripts/mutate.py").read_text(encoding="utf-8")
+    rows = [r for r in mutate.all_rows() if r["file"] == "scripts/mutate.py"]
+    assert rows, "the runner's own rows are missing"
+    assert _inside_repair(text, rows, mutate) == []
+
+
+REPAIR_CALLING_A_RULE = """
+def write(kept):
+    # RULE: a repaired file is written whole
+    path.write_text(kept)
+
+
+def repair():
+    write(kept)
+"""
+
+
+def test_a_rule_in_what_repair_calls_is_found(mutate):
+    """A helper repair() calls runs switched off too, so its rule cannot be proven either."""
+    assert _inside_repair(REPAIR_CALLING_A_RULE, [], mutate) == ["a repaired file is written whole"]
+
+
+def test_a_runner_with_no_repair_is_refused_by_name(mutate):
+    """Renamed, repair() would leave the guard checking nothing; it says what it looked for."""
+    with pytest.raises(AssertionError, match=r"no repair\(\) in"):
+        _inside_repair("def mend():\n    pass\n", [], mutate)
+
+
+REPAIR_AWAITING_A_RULE = """
+async def write(kept):
+    # RULE: an awaited repair is written whole
+    path.write_text(kept)
+
+
+def repair():
+    run(write(kept))
+"""
+
+
+def test_a_rule_in_an_async_helper_repair_calls_is_found(mutate):
+    """An `async def` helper runs switched off too, once repair() calls it."""
+    assert _inside_repair(REPAIR_AWAITING_A_RULE, [], mutate) == ["an awaited repair is written whole"]
