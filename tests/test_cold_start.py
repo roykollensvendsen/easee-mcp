@@ -70,7 +70,9 @@ def cold_start(tmp_path, first="", wall=WALL_SECONDS):
     """The tools a cold start lists, and the CPU seconds the server spent, once it has exited.
 
     A child's CPU time is counted only once it has been waited for; the client closes the
-    server and waits for it before it returns, so the figure is whole.
+    server and waits for it before it returns, so the figure is whole. The count is of
+    every child this process waited for in that window, so it assumes the tests run one
+    at a time and nothing else is started inside it; keep the window to the start alone.
     """
     env = dict(os.environ)
     # An empty bytecode folder: nothing compiled before can be reused.
