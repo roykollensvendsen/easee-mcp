@@ -638,12 +638,27 @@ def test_without_uv_the_count_is_skipped_here_and_fails_in_ci(monkeypatch):
         _needs_uv()
 
 
+def _started(process, arguments, seconds=5):
+    """Wait until `/proc` shows `process` running `arguments`.
+
+    Popen can return while the new program's command line still reads as empty, measured
+    in 50 of 2000 starts here; read then, the test's own stand-in would look like a stranger.
+    """
+    wanted = [str(part).encode() for part in arguments]
+    deadline = time.monotonic() + seconds
+    while pathlib.Path(f"/proc/{process.pid}/cmdline").read_bytes().split(b"\0")[:-1] != wanted:
+        assert time.monotonic() < deadline, f"{arguments[0]} never showed its own arguments"
+        time.sleep(0.001)
+
+
 def test_the_count_kills_only_a_process_that_is_still_its_own(tmp_path):
     """A step that has ended frees its pid; a process that took it since must never be killed."""
     mark = str(tmp_path / "told")
     waits = [sys.executable, "-c", "import time; time.sleep(30)"]
     with subprocess.Popen(waits) as stranger, subprocess.Popen([*waits, mark]) as ours:
         try:
+            _started(stranger, waits)
+            _started(ours, [*waits, mark])
             _kill_if_ours(stranger.pid, mark)
             _kill_if_ours(ours.pid, mark)
             assert ours.wait(timeout=5) == -signal.SIGKILL
