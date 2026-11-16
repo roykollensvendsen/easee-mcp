@@ -1,0 +1,5 @@
+[[rule]]
+name = "the voice server closes its connection to Easee when it stops"
+file = "src/easee_mcp/server.py"
+find = 'await answers\.close\(\)'
+replace = 'pass'
