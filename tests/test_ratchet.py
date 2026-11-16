@@ -10,6 +10,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import shutil
 import signal
 import subprocess
 import sys
@@ -446,6 +447,7 @@ COUNTS_STOPS = textwrap.dedent(
     with open(sys.argv[1], "w") as told:
         told.write("ready")
     signal.sigwait({signal.SIGINT})
+    # Two seconds is a guess: uv passes a Ctrl-C on at once, so a second one comes well within it.
     again = signal.sigtimedwait({signal.SIGINT}, 2)
     with open(sys.argv[2], "w") as counted:
         counted.write("2" if again else "1")
@@ -465,11 +467,25 @@ RATCHET_IN_A_UV_STEP = textwrap.dedent(
 )
 
 
+def _needs_uv():
+    """Skip without uv here; in CI, where the proof must always run, fail instead."""
+    if shutil.which("uv") is None:
+        missing = "uv is not installed, so a real `uv run` chain cannot be counted"
+        if os.environ.get("CI"):
+            pytest.fail(f"{missing}; CI must run this proof.")
+        pytest.skip(missing)
+
+
 def test_a_stopped_quality_run_tells_its_step_to_stop_once(tmp_path):
     """Sent to the step's whole group, Ctrl-C reaches `uv run`'s child twice: once itself, once from uv.
 
     The second one cuts the step's own cleanup short, a mutation run's included.
+
+    The count can only come out too low, never too high: two Ctrl-Cs that arrive while the
+    step holds them back merge into one. So a red result is always real, and a green one is
+    strong but not airtight; the mutation row that swaps the stop back is the repeated check.
     """
+    _needs_uv()
     fifo, counted = tmp_path / "told", tmp_path / "counted"
     os.mkfifo(fifo)
     with subprocess.Popen(
@@ -548,3 +564,14 @@ def test_a_step_that_already_ended_needs_no_stop(monkeypatch):
     monkeypatch.setattr(ratchet.os, "killpg", gone)
     with pytest.raises(SystemExit):
         ratchet._run("true")  # noqa: SLF001 - the step runner under test
+
+
+def test_without_uv_the_count_is_skipped_here_and_fails_in_ci(monkeypatch):
+    """The proof that a step hears one Ctrl-C needs uv; in CI it must never drop out quietly."""
+    monkeypatch.setattr(shutil, "which", lambda _: None)
+    monkeypatch.delenv("CI", raising=False)
+    with pytest.raises(pytest.skip.Exception, match="uv is not installed"):
+        _needs_uv()
+    monkeypatch.setenv("CI", "true")
+    with pytest.raises(pytest.fail.Exception, match="uv is not installed"):
+        _needs_uv()
