@@ -13,12 +13,16 @@ import pathlib
 import secrets
 import signal
 import sys
+from typing import TYPE_CHECKING, Any
 
 from easee_mcp.adapter import EaseeReader, NotSetUpError
 from easee_mcp.answers import ChargerAnswers
 from easee_mcp.cache import CachedCharger
 from easee_mcp.fake import FAKE_PASSWORD, FAKE_USER, FakeEaseeCloud
 from easee_mcp.status import STATUS_FILE, StatusFile
+
+if TYPE_CHECKING:
+    from mcp.server.mcpserver import MCPServer
 
 #: Every verb this command has. The documentation test requires each one to
 #: appear in a worked example, so a verb cannot be added without one.
@@ -61,6 +65,23 @@ def save_login(folder: pathlib.Path, user: str, password: str) -> None:
     The folder is opened once, refusing a link, and checked as this user's; every write
     then goes through that open folder, so it cannot be swapped for a link on the way.
     """
+    held = _open_ours(folder)
+    written: list[tuple[str, str]] = []
+    try:
+        for name, value in (("password", password), ("user", user)):
+            written.append((_write_new(held, name, value), name))
+        _put_in_place(held, written)
+    except BaseException:
+        for temporary, _ in written:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(temporary, dir_fd=held)
+        raise
+    finally:
+        os.close(held)
+
+
+def _open_ours(folder: pathlib.Path) -> int:
+    """The login folder, made if missing, opened without following a link, checked, and closed to others."""
     folder.parent.mkdir(parents=True, exist_ok=True)
     with contextlib.suppress(FileExistsError):
         folder.mkdir(mode=0o700)
@@ -69,26 +90,24 @@ def save_login(folder: pathlib.Path, user: str, password: str) -> None:
     except OSError as error:
         msg = f"{folder} is a link, or not a folder of yours: nothing was saved."
         raise NotYoursError(msg) from error
-    written: list[tuple[str, str]] = []
     try:
         _check_ours(held, folder)
         # RULE: the login folder is readable by its owner alone
         os.fchmod(held, 0o700)
-        for name, value in (("password", password), ("user", user)):
-            written.append((_write_new(held, name, value), name))
-        before = signal.pthread_sigmask(signal.SIG_BLOCK, STOPS)
-        try:
-            for temporary, name in written:
-                os.replace(temporary, name, src_dir_fd=held, dst_dir_fd=held)
-        finally:
-            signal.pthread_sigmask(signal.SIG_SETMASK, before)
     except BaseException:
-        for temporary, _ in written:
-            with contextlib.suppress(FileNotFoundError):
-                os.unlink(temporary, dir_fd=held)
-        raise
-    finally:
         os.close(held)
+        raise
+    return held
+
+
+def _put_in_place(held: int, written: list[tuple[str, str]]) -> None:
+    """Rename each new file over its old one, with the stops held off so both change together."""
+    before = signal.pthread_sigmask(signal.SIG_BLOCK, STOPS)
+    try:
+        for temporary, name in written:
+            os.replace(temporary, name, src_dir_fd=held, dst_dir_fd=held)
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, before)
 
 
 def _check_ours(held: int, folder: pathlib.Path) -> None:
@@ -148,8 +167,7 @@ def _answers(*, simulate: bool, login_dir: str | None) -> ChargerAnswers:
     return ChargerAnswers(CachedCharger(reader, now=_now))
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Parse arguments and dispatch. Returns a process exit code."""
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="easee-mcp", description=__doc__, formatter_class=HELP)
     verbs = parser.add_subparsers(dest="command", required=True)
     serve = verbs.add_parser(
@@ -167,13 +185,26 @@ def main(argv: list[str] | None = None) -> int:
         verb.add_argument(
             "--login-dir", help=f"the folder holding 'user' and 'password' (default {LOGIN_DIR})"
         )
-    args = parser.parse_args(argv)
+    return parser
+
+
+def _say_status(server: MCPServer[Any]) -> int:
+    """Say the charger's status once, as the voice would hear it."""
+    from mcp.types import CallToolResult  # noqa: PLC0415 - a slow import, needed only here
+
+    result = asyncio.run(server.call_tool("charger_status", {}))
+    answer = result.structured_content if isinstance(result, CallToolResult) else None
+    sys.stdout.write(str((answer or {}).get("say", "")) + "\n")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Parse arguments and dispatch. Returns a process exit code."""
+    args = _parser().parse_args(argv)
     if args.command == "login":
-        return login(pathlib.Path(args.login_dir).expanduser() if args.login_dir else LOGIN_DIR.expanduser())
+        return login(pathlib.Path(args.login_dir or LOGIN_DIR).expanduser())
 
     # The MCP server is a slow import, and only a working command needs it.
-    from mcp.types import CallToolResult  # noqa: PLC0415
-
     from easee_mcp.server import build_server  # noqa: PLC0415
 
     # The simulation leaves nothing behind, so it writes no status file.
@@ -181,10 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     answers = _answers(simulate=args.simulate, login_dir=args.login_dir)
     server = build_server(answers, simulated=args.simulate, status=status_file)
     if args.command == "status":
-        result = asyncio.run(server.call_tool("charger_status", {}))
-        answer = result.structured_content if isinstance(result, CallToolResult) else None
-        sys.stdout.write(str((answer or {}).get("say", "")) + "\n")
-        return 0
+        return _say_status(server)
     server.run("stdio")  # pragma: no cover - runs until stdin closes
     return 0  # pragma: no cover
 
