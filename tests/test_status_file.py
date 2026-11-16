@@ -134,7 +134,7 @@ def _writes_in(tree):
 #: The one place outside the status file that writes: the owner's own `easee-mcp login`,
 #: run by hand, saving the login (ADR-EM-003), through the helper it writes each file with.
 #: The server itself never calls it.
-LOGIN_WRITER = ("cli.py", ("save_login", "_write_new"))
+LOGIN_WRITER = ("cli.py", ("save_login", "_open_ours", "_write_new", "_put_in_place"))
 
 
 def test_the_status_file_is_the_only_file_the_server_writes():
@@ -167,7 +167,9 @@ def test_the_server_never_saves_the_login():
         for outer in tree.body
         if isinstance(outer, ast.FunctionDef)
         for node in ast.walk(outer)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_write_new"
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in LOGIN_WRITER[1][1:]
     }
     assert callers == {"login"}
     assert helpers == {"save_login"}
