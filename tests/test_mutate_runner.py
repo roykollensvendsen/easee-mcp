@@ -366,3 +366,12 @@ def test_a_mutation_run_checks_the_package_before_it_measures(tmp_path, monkeypa
         mutate.main()
     assert suites == []
     assert source.read_text() == "x = 1\n"
+
+
+def test_a_mutation_run_refuses_a_checkout_with_no_package(tmp_path, monkeypatch, mutate):
+    """Run from the wrong folder, the check would find nothing to check and let the run go on."""
+    (tmp_path / "src").mkdir()
+    monkeypatch.setattr(mutate, "ROOT", tmp_path)
+    with pytest.raises(SystemExit, match="no package") as refused:
+        mutate.check_the_package()
+    assert str(tmp_path / "src") in str(refused.value)
