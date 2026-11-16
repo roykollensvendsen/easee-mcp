@@ -436,3 +436,115 @@ def test_a_quality_run_checks_the_package_before_it_measures(monkeypatch):
     with pytest.raises(SystemExit, match="another checkout"):
         ratchet.measure()
     assert ran == []
+
+
+#: A step that counts the Ctrl-Cs it gets: it waits for one, then up to two seconds for another.
+COUNTS_STOPS = textwrap.dedent(
+    """
+    import signal, sys
+    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+    with open(sys.argv[1], "w") as told:
+        told.write("ready")
+    signal.sigwait({signal.SIGINT})
+    again = signal.sigtimedwait({signal.SIGINT}, 2)
+    with open(sys.argv[2], "w") as counted:
+        counted.write("2" if again else "1")
+    """
+)
+
+#: The ratchet, running that step the way it runs every step: through `uv run`.
+RATCHET_IN_A_UV_STEP = textwrap.dedent(
+    """
+    import importlib.util, sys
+    spec = importlib.util.spec_from_file_location("ratchet", sys.argv[1])
+    ratchet = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ratchet)
+    ratchet.stop_cleanly()
+    ratchet._run("uv", "run", "--no-project", sys.executable, "-c", sys.argv[2], sys.argv[3], sys.argv[4])
+    """
+)
+
+
+def test_a_stopped_quality_run_tells_its_step_to_stop_once(tmp_path):
+    """Sent to the step's whole group, Ctrl-C reaches `uv run`'s child twice: once itself, once from uv.
+
+    The second one cuts the step's own cleanup short, a mutation run's included.
+    """
+    fifo, counted = tmp_path / "told", tmp_path / "counted"
+    os.mkfifo(fifo)
+    with subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            RATCHET_IN_A_UV_STEP,
+            str(ROOT / "scripts/ratchet.py"),
+            COUNTS_STOPS,
+            str(fifo),
+            str(counted),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as ratchet:
+        try:
+            with fifo.open() as told:
+                assert told.read() == "ready"
+            ratchet.send_signal(signal.SIGTERM)
+            _, err = ratchet.communicate(timeout=30)
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(ratchet.pid, signal.SIGKILL)
+    assert counted.read_text() == "1", err
+
+
+def test_a_stop_that_cannot_reach_a_running_step_is_not_hidden(monkeypatch):
+    """A step that is gone needs no stop; one still running that cannot be reached must be said."""
+
+    class Running:
+        pid = 1_000_000
+
+        def __init__(self, *_, **__):
+            self.waits = 0
+
+        def wait(self):
+            self.waits += 1
+            if self.waits == 1:
+                raise SystemExit(128 + signal.SIGTERM)  # the ratchet's own stop handler
+
+        def poll(self):
+            return None
+
+    def unreachable(*_):
+        raise ProcessLookupError
+
+    monkeypatch.setattr(ratchet.subprocess, "Popen", Running)
+    monkeypatch.setattr(ratchet.os, "kill", unreachable)
+    monkeypatch.setattr(ratchet.os, "killpg", unreachable)
+    with pytest.raises(ProcessLookupError):
+        ratchet._run("true")  # noqa: SLF001 - the step runner under test
+
+
+def test_a_step_that_already_ended_needs_no_stop(monkeypatch):
+    class Ended:
+        pid = 1_000_000
+
+        def __init__(self, *_, **__):
+            self.waits = 0
+
+        def wait(self):
+            self.waits += 1
+            if self.waits == 1:
+                raise SystemExit(128 + signal.SIGTERM)  # the ratchet's own stop handler
+
+        def poll(self):
+            return 0
+
+    def gone(*_):
+        raise ProcessLookupError
+
+    monkeypatch.setattr(ratchet.subprocess, "Popen", Ended)
+    monkeypatch.setattr(ratchet.os, "kill", gone)
+    monkeypatch.setattr(ratchet.os, "killpg", gone)
+    with pytest.raises(SystemExit):
+        ratchet._run("true")  # noqa: SLF001 - the step runner under test

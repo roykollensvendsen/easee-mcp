@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import contextlib
 import json
 import os
 import re
@@ -285,6 +284,18 @@ def mutation_tally(output: str, returncode: int) -> dict[str, int]:
     return {"killed": killed if returncode == 0 else min(killed, total - 1), "total": total}
 
 
+def _stop(step: subprocess.Popen[str]) -> None:
+    """Tell a running step to stop, once; a step that has already ended needs nothing."""
+    try:
+        # RULE: a stopped quality run stops its step and waits for it
+        # RULE: a stopped quality run tells its step to stop once
+        os.kill(step.pid, signal.SIGINT)
+    except ProcessLookupError:
+        # RULE: a stop that cannot reach a running step is not hidden
+        if step.poll() is None:
+            raise
+
+
 def _run(
     *command: str,
     cwd: Path = ROOT,
@@ -293,10 +304,12 @@ def _run(
     """Run one step, and stop it as Ctrl-C would if the ratchet is stopped while it runs.
 
     The step gets a session of its own, so a Ctrl-C in the terminal reaches it only through
-    the ratchet, once. On a stop the step's group gets SIGINT and is waited for with no time
-    limit: a mutation run puts its source back before it ends, however long that takes. A
-    step that hangs even so is ended by hand with `kill -9 -- -<its pid>`. Its output goes
-    to temporary files, so a step with a lot to say never blocks on a full pipe.
+    the ratchet. On a stop the step itself gets one SIGINT, and is waited for with no time
+    limit: a mutation run puts its source back before it ends, however long that takes. Only
+    the step, not its group: `uv run` passes a Ctrl-C on to its child, so a group-wide one
+    would reach that child twice, and the second would cut its cleanup short. A step that
+    hangs even so is ended by hand, with its whole group, by `kill -9 -- -<its pid>`. Its
+    output goes to temporary files, so a step with a lot to say never blocks on a full pipe.
     """
     with tempfile.TemporaryFile("w+") as out, tempfile.TemporaryFile("w+") as err:
         step = subprocess.Popen(  # noqa: S603
@@ -315,9 +328,7 @@ def _run(
             sys.stderr.write(
                 f"Stopping {command[0]} and waiting for it; if it hangs: kill -9 -- -{step.pid}\n"
             )
-            with contextlib.suppress(ProcessLookupError):
-                # RULE: a stopped quality run stops its step and waits for it
-                os.killpg(step.pid, signal.SIGINT)
+            _stop(step)
             step.wait()
             raise
         out.seek(0)

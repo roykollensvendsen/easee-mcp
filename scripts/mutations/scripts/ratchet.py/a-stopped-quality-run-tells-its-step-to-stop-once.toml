@@ -1,0 +1,5 @@
+[[rule]]
+name = "a stopped quality run tells its step to stop once"
+file = "scripts/ratchet.py"
+find = 'os\.kill\(step\.pid, signal\.SIGINT\)'
+replace = 'os.killpg(step.pid, signal.SIGINT)'
