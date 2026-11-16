@@ -263,7 +263,15 @@ def check_the_package() -> None:
     interpreter, the one the suite will run in, so nothing this script imported can fool it.
     """
     source = (ROOT / "src").resolve()
-    for package in sorted(p.parent.name for p in source.glob("*/__init__.py")):
+    packages = sorted(p.parent.name for p in source.glob("*/__init__.py"))
+    if not packages:
+        empty = (
+            f"There is no package in {source} to check, so this run would measure nothing of its own."
+            " Run it from the plugin's checkout, where src/easee_mcp/ is."
+        )
+        # RULE: a mutation run refuses a checkout with no package
+        raise SystemExit(empty)
+    for package in packages:
         found = subprocess.run(  # noqa: S603
             [sys.executable, "-c", f"import {package}; print({package}.__file__)"],
             cwd=ROOT,
