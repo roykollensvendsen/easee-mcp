@@ -15,6 +15,7 @@ import signal
 import subprocess
 import sys
 import textwrap
+import time
 
 import pytest
 
@@ -442,10 +443,10 @@ def test_a_quality_run_checks_the_package_before_it_measures(monkeypatch):
 #: A step that counts the Ctrl-Cs it gets: it waits for one, then up to two seconds for another.
 COUNTS_STOPS = textwrap.dedent(
     """
-    import signal, sys
+    import os, signal, sys
     signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
     with open(sys.argv[1], "w") as told:
-        told.write("ready")
+        told.write(f"ready {os.getpid()} {os.getppid()}")  # this step, and the uv that runs it
     signal.sigwait({signal.SIGINT})
     # Two seconds is a guess: uv passes a Ctrl-C on at once, so a second one comes well within it.
     again = signal.sigtimedwait({signal.SIGINT}, 2)
@@ -462,6 +463,8 @@ RATCHET_IN_A_UV_STEP = textwrap.dedent(
     ratchet = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(ratchet)
     ratchet.stop_cleanly()
+    if sys.argv[5] == "muted":  # as a mutation that switches the stop off leaves it
+        ratchet._stop = lambda step: None
     ratchet._run("uv", "run", "--no-project", sys.executable, "-c", sys.argv[2], sys.argv[3], sys.argv[4])
     """
 )
@@ -486,32 +489,74 @@ def test_a_stopped_quality_run_tells_its_step_to_stop_once(tmp_path):
     strong but not airtight; the mutation row that swaps the stop back is the repeated check.
     """
     _needs_uv()
+    count, _, err = _count_stops(tmp_path)
+    assert count == "1", err
+
+
+def _gone(pid, seconds):
+    """Whether process `pid` has ended (or is only a zombie left to reap) within `seconds`."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            state = pathlib.Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+        except FileNotFoundError:
+            return True
+        if state == "Z":
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _count_stops(tmp_path, *, muted=False, guard=30):
+    """Stop a ratchet running COUNTS_STOPS under uv; the count, whether the step and uv ended, and stderr."""
     fifo, counted = tmp_path / "told", tmp_path / "counted"
     os.mkfifo(fifo)
+    script = str(ROOT / "scripts/ratchet.py")
+    arguments = [
+        RATCHET_IN_A_UV_STEP,
+        script,
+        COUNTS_STOPS,
+        str(fifo),
+        str(counted),
+        "muted" if muted else "-",
+    ]
+    pids = []
     with subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            RATCHET_IN_A_UV_STEP,
-            str(ROOT / "scripts/ratchet.py"),
-            COUNTS_STOPS,
-            str(fifo),
-            str(counted),
-        ],
+        [sys.executable, "-c", *arguments],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         start_new_session=True,
     ) as ratchet:
+        err = ""
         try:
             with fifo.open() as told:
-                assert told.read() == "ready"
+                _, step, uv = told.read().split()
+            pids = [int(step), int(uv)]
             ratchet.send_signal(signal.SIGTERM)
-            _, err = ratchet.communicate(timeout=30)
+            _, err = ratchet.communicate(timeout=guard)
+        except subprocess.TimeoutExpired:
+            pass
         finally:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(ratchet.pid, signal.SIGKILL)
-    assert counted.read_text() == "1", err
+            # By pid alone, never by group: the step and uv run in a session of their own,
+            # which the ratchet's death leaves running, and a group kill could reach the runner.
+            ratchet.kill()
+            for pid in pids:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGKILL)
+    ended = all(_gone(pid, 10) for pid in pids)
+    return (counted.read_text() if counted.exists() else None), ended, err
+
+
+def test_a_count_that_gives_up_leaves_no_step_running(tmp_path):
+    """With the stop switched off, the step never ends by itself; the test must end it, and uv with it.
+
+    Left running, the pair holds uv's cache lock for every later run on the machine.
+    """
+    _needs_uv()
+    count, ended, _ = _count_stops(tmp_path, muted=True, guard=3)
+    assert count is None
+    assert ended
 
 
 def test_a_stop_that_cannot_reach_a_running_step_is_not_hidden(monkeypatch):
