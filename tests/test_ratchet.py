@@ -446,7 +446,9 @@ COUNTS_STOPS = textwrap.dedent(
     import os, signal, sys
     signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
     with open(sys.argv[1], "w") as told:
-        told.write(f"ready {os.getpid()} {os.getppid()}")  # this step, and the uv that runs it
+        # This step, and the uv that runs it: read now, while uv is alive. Read later, the
+        # parent could be whatever adopted the step, such as systemd or tmux.
+        told.write(f"ready {os.getpid()} {os.getppid()}")
     signal.sigwait({signal.SIGINT})
     # Two seconds is a guess: uv passes a Ctrl-C on at once, so a second one comes well within it.
     again = signal.sigtimedwait({signal.SIGINT}, 2)
@@ -507,6 +509,21 @@ def _gone(pid, seconds):
     return False
 
 
+def _kill_if_ours(pid, mark):
+    """End `pid` at once, as long as it is still one of this test's own processes.
+
+    A step that has already ended frees its pid, and another program may take it; only a
+    process whose command line still carries `mark`, this test's own path, is ours.
+    """
+    try:
+        command = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+    except FileNotFoundError:
+        return
+    if mark.encode() in command:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, signal.SIGKILL)
+
+
 def _count_stops(tmp_path, *, muted=False, guard=30):
     """Stop a ratchet running COUNTS_STOPS under uv; the count, whether the step and uv ended, and stderr."""
     fifo, counted = tmp_path / "told", tmp_path / "counted"
@@ -542,8 +559,7 @@ def _count_stops(tmp_path, *, muted=False, guard=30):
             # which the ratchet's death leaves running, and a group kill could reach the runner.
             ratchet.kill()
             for pid in pids:
-                with contextlib.suppress(ProcessLookupError):
-                    os.kill(pid, signal.SIGKILL)
+                _kill_if_ours(pid, str(fifo))
     ended = all(_gone(pid, 10) for pid in pids)
     return (counted.read_text() if counted.exists() else None), ended, err
 
@@ -620,3 +636,18 @@ def test_without_uv_the_count_is_skipped_here_and_fails_in_ci(monkeypatch):
     monkeypatch.setenv("CI", "true")
     with pytest.raises(pytest.fail.Exception, match="uv is not installed"):
         _needs_uv()
+
+
+def test_the_count_kills_only_a_process_that_is_still_its_own(tmp_path):
+    """A step that has ended frees its pid; a process that took it since must never be killed."""
+    mark = str(tmp_path / "told")
+    waits = [sys.executable, "-c", "import time; time.sleep(30)"]
+    with subprocess.Popen(waits) as stranger, subprocess.Popen([*waits, mark]) as ours:
+        try:
+            _kill_if_ours(stranger.pid, mark)
+            _kill_if_ours(ours.pid, mark)
+            assert ours.wait(timeout=5) == -signal.SIGKILL
+            assert stranger.poll() is None
+        finally:
+            stranger.kill()
+            ours.kill()
