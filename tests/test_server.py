@@ -2,9 +2,13 @@
 
 import asyncio
 import datetime as dt
+import gc
+import warnings
 
+import pyeasee
 import pytest
 
+from easee_mcp import cli
 from easee_mcp.adapter import EaseeReader, NotSetUpError
 from easee_mcp.answers import ChargerAnswers
 from easee_mcp.cache import CachedCharger
@@ -107,3 +111,27 @@ def test_the_command_line_says_the_status_from_the_simulation(capsys):
     out = capsys.readouterr().out
     assert out.startswith("Simulated: Garasje is charging at 7.2 kW")
     assert FAKE_CHARGER_ID not in out
+
+
+def test_the_status_command_closes_its_connection_to_easee(tmp_path, monkeypatch, capsys):
+    """Even when Easee is down: left open, it shows on the owner's screen as an "Unclosed client session"."""
+    folder = tmp_path / "login"
+    folder.mkdir(mode=0o700)
+    for name, value in (("user", FAKE_USER), ("password", FAKE_PASSWORD)):
+        (folder / name).write_text(value)
+        (folder / name).chmod(0o600)
+    monkeypatch.setattr(cli, "STATUS_FILE", tmp_path / "status.json")
+    started = pyeasee.Easee.__init__
+
+    def nowhere(self, *args, **kwargs):
+        """A real connection, sent to a closed local port, so Easee is down at once and nothing leaves."""
+        started(self, *args, **kwargs)
+        self.base = "http://127.0.0.1:1"
+
+    monkeypatch.setattr(pyeasee.Easee, "__init__", nowhere)
+    with warnings.catch_warnings(record=True) as seen:
+        warnings.simplefilter("always")
+        assert main(["status", "--login-dir", str(folder)]) == 0
+        gc.collect()
+    assert "isn't answering" in capsys.readouterr().out
+    assert not [warning.message for warning in seen if "Unclosed" in str(warning.message)]

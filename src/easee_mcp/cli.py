@@ -188,11 +188,18 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _say_status(server: MCPServer[Any]) -> int:
-    """Say the charger's status once, as the voice would hear it."""
+def _say_status(server: MCPServer[Any], answers: ChargerAnswers) -> int:
+    """Say the charger's status once, as the voice would hear it, and close the connection."""
     from mcp.types import CallToolResult  # noqa: PLC0415 - a slow import, needed only here
 
-    result = asyncio.run(server.call_tool("charger_status", {}))
+    async def asked() -> Any:  # noqa: ANN401 - whatever the server hands back
+        try:
+            return await server.call_tool("charger_status", {})
+        finally:
+            # RULE: the status command closes its connection to Easee
+            await answers.close()
+
+    result = asyncio.run(asked())
     answer = result.structured_content if isinstance(result, CallToolResult) else None
     sys.stdout.write(str((answer or {}).get("say", "")) + "\n")
     return 0
@@ -212,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
     answers = _answers(simulate=args.simulate, login_dir=args.login_dir)
     server = build_server(answers, simulated=args.simulate, status=status_file)
     if args.command == "status":
-        return _say_status(server)
+        return _say_status(server, answers)
     server.run("stdio")  # pragma: no cover - runs until stdin closes
     return 0  # pragma: no cover
 
