@@ -1,0 +1,5 @@
+[[rule]]
+name = "the status command closes its connection to Easee"
+file = "src/easee_mcp/cli.py"
+find = 'await answers\.close\(\)'
+replace = 'pass'

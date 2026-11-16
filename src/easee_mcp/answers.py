@@ -63,6 +63,10 @@ class ChargerAnswers:
         """Reads left this hour on the tighter of Easee's hourly limits."""
         return self._charger.calls_left_hour()
 
+    async def close(self) -> None:
+        """Close the connection to Easee, if one was opened."""
+        await self._charger.close()
+
     async def status(self) -> dict[str, Any]:
         """Is it charging, how fast, how much this session, and the limit."""
         name = one_line((await self._charger.which()).name)
