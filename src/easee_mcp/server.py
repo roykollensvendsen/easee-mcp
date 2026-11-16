@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import math
 from typing import TYPE_CHECKING, Any
@@ -12,7 +13,7 @@ from mcp.types import ToolAnnotations
 from easee_mcp.adapter import CloudDownError, LoginRefusedError, NotAllowedError, NotSetUpError, SlowDownError
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
     from easee_mcp.answers import ChargerAnswers
     from easee_mcp.status import StatusFile
@@ -68,9 +69,20 @@ def build_server(
     answers: ChargerAnswers, *, simulated: bool = False, status: StatusFile | None = None
 ) -> MCPServer[Any]:
     """The MCP server with the four charger tools, answering from ``answers``; ``status`` records each."""
+
+    @contextlib.asynccontextmanager
+    async def closing(_: MCPServer[Any]) -> AsyncIterator[None]:
+        """Keep one connection to Easee while the server runs, and close it as the server stops."""
+        try:
+            yield
+        finally:
+            # RULE: the voice server closes its connection to Easee when it stops
+            await answers.close()
+
     server: MCPServer[Any] = MCPServer(
         name="easee-simulated" if simulated else "easee",
         instructions=(SIMULATED + INSTRUCTIONS) if simulated else INSTRUCTIONS,
+        lifespan=closing,
     )
 
     def recorded(answer: dict[str, Any]) -> None:

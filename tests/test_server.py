@@ -7,6 +7,7 @@ import warnings
 
 import pyeasee
 import pytest
+from mcp import Client
 
 from easee_mcp import cli
 from easee_mcp.adapter import EaseeReader, NotSetUpError
@@ -135,3 +136,28 @@ def test_the_status_command_closes_its_connection_to_easee(tmp_path, monkeypatch
         gc.collect()
     assert "isn't answering" in capsys.readouterr().out
     assert not [warning.message for warning in seen if "Unclosed" in str(warning.message)]
+
+
+def test_the_voice_server_closes_its_connection_to_easee_when_it_stops(monkeypatch):
+    """The voice system stops the server; the connection it read with must not outlive it."""
+    started = pyeasee.Easee.__init__
+    opened = []
+
+    def nowhere(self, *args, **kwargs):
+        """A real connection, sent to a closed local port, so Easee is down at once and nothing leaves."""
+        started(self, *args, **kwargs)
+        self.base = "http://127.0.0.1:1"
+        opened.append(self.session)
+
+    monkeypatch.setattr(pyeasee.Easee, "__init__", nowhere)
+    reader = EaseeReader(lambda: (FAKE_USER, FAKE_PASSWORD))
+    server = build_server(ChargerAnswers(CachedCharger(reader, now=lambda: AT)))
+
+    async def one_question():
+        async with Client(server) as client:
+            return await client.call_tool("charger_status", {})
+
+    answer = asyncio.run(one_question())
+    assert "isn't answering" in answer.structured_content["say"]
+    assert opened
+    assert all(session.closed for session in opened)
