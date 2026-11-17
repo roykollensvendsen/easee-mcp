@@ -547,7 +547,33 @@ def test_a_process_that_ends_while_its_command_is_read_is_left_alone(monkeypatch
     assert killed == []
 
 
-def _count_stops(tmp_path, *, muted=False, guard=30):
+def _ready(fifo, seconds):
+    """What the step wrote to `fifo`; a failure, not a hang, if it writes nothing within `seconds`.
+
+    Opening a pipe for reading waits until someone opens it to write, and a step that never
+    starts never does, so the pipe is opened without waiting and read until the writer is done.
+    """
+    fd = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
+    got = b""
+    deadline = time.monotonic() + seconds
+    try:
+        while time.monotonic() < deadline:
+            try:
+                chunk = os.read(fd, 4096)
+            except BlockingIOError:  # the step has the pipe open but has not written yet
+                chunk = None
+            if chunk:
+                got += chunk
+                continue
+            if chunk == b"" and got:  # the step has written and closed its end
+                return got.decode()
+            time.sleep(0.05)
+    finally:
+        os.close(fd)
+    pytest.fail(f"the step never said it was ready within {seconds} s")
+
+
+def _count_stops(tmp_path, *, muted=False, guard=30, ready=10):
     """Stop a ratchet running COUNTS_STOPS under uv; the count, whether the step and uv ended, and stderr."""
     fifo, counted = tmp_path / "told", tmp_path / "counted"
     os.mkfifo(fifo)
@@ -570,8 +596,7 @@ def _count_stops(tmp_path, *, muted=False, guard=30):
     ) as ratchet:
         err = ""
         try:
-            with fifo.open() as told:
-                _, step, uv = told.read().split()
+            _, step, uv = _ready(fifo, ready).split()
             pids = [int(step), int(uv)]
             ratchet.send_signal(signal.SIGTERM)
             _, err = ratchet.communicate(timeout=guard)
@@ -596,6 +621,18 @@ def test_a_count_that_gives_up_leaves_no_step_running(tmp_path):
     count, ended, _ = _count_stops(tmp_path, muted=True, guard=3)
     assert count is None
     assert ended
+
+
+def test_a_step_that_never_says_it_is_ready_fails_the_count_instead_of_hanging(tmp_path, monkeypatch):
+    """A mutant, or a uv waiting on another run's lock, can keep the step from ever starting.
+
+    Waiting for it without end hung a whole mutation run in CI until GitHub cancelled it.
+    """
+    monkeypatch.setattr(sys.modules[__name__], "RATCHET_IN_A_UV_STEP", "import time; time.sleep(60)")
+    started = time.monotonic()
+    with pytest.raises(pytest.fail.Exception, match="never said it was ready"):
+        _count_stops(tmp_path, ready=1)
+    assert time.monotonic() - started < 30
 
 
 def test_a_stop_that_cannot_reach_a_running_step_is_not_hidden(monkeypatch):
