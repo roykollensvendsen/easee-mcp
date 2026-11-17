@@ -139,7 +139,12 @@ def test_the_status_command_closes_its_connection_to_easee(tmp_path, monkeypatch
 
 
 def test_the_voice_server_closes_its_connection_to_easee_when_it_stops(monkeypatch):
-    """The voice system stops the server; the connection it read with must not outlive it."""
+    """The voice system stops the server; the connection it read with must not outlive it.
+
+    This asks each connection whether it is closed rather than waiting for Python's
+    "Unclosed client session" warning: the test still holds the server, so the warning
+    would never come, close or no close.
+    """
     started = pyeasee.Easee.__init__
     opened = []
 
