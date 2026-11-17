@@ -244,6 +244,37 @@ def test_one_mutation_run_per_checkout(tmp_path, monkeypatch, mutate):
     assert suites == []
 
 
+def test_a_mutation_run_names_each_rule_before_it_tests_it(tmp_path, monkeypatch, mutate):
+    """The name must be out of the process, not in its buffer, by the time the suite starts.
+
+    In CI the output is a pipe, which Python holds back until it is full; a run that hung
+    on one rule for six hours left nothing in the log to say which.
+    """
+
+    class Pipe:
+        """Output that, like a pipe, shows only what has been flushed."""
+
+        def __init__(self):
+            self.held, self.shown = "", ""
+
+        def write(self, text):
+            self.held += text
+            return len(text)
+
+        def flush(self):
+            self.shown, self.held = self.shown + self.held, ""
+
+    root, _ = _one_rule(tmp_path)
+    _point_at(monkeypatch, mutate, root)
+    monkeypatch.setattr(mutate, "check_the_package", lambda: None)
+    pipe = Pipe()
+    monkeypatch.setattr(mutate.sys, "stdout", pipe)
+    seen = []
+    monkeypatch.setattr(mutate, "run_suite", lambda: seen.append(pipe.shown) or (1, ["test_a_rule"]))
+    mutate.main()
+    assert "a rule" in seen[0]
+
+
 def test_a_repair_only_run_only_repairs(tmp_path, monkeypatch, mutate):
     root, source = _one_rule(tmp_path, left_mutated=True)
     suites = _point_at(monkeypatch, mutate, root, "--repair-only")
@@ -295,6 +326,7 @@ def _stop_mid_mutation(tmp_path, *stops):
         stderr=subprocess.PIPE,
         text=True,
     ) as run:
+        assert run.stdout.readline() == "testing  a rule\n"
         assert run.stdout.readline() == "measuring\n"
         assert source.read_text() == "x = 2\n"
         run.send_signal(stops[0])
