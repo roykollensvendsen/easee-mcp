@@ -501,12 +501,22 @@ def _gone(pid, seconds):
     while time.monotonic() < deadline:
         try:
             state = pathlib.Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             return True
         if state == "Z":
             return True
         time.sleep(0.05)
     return False
+
+
+def test_a_process_that_ends_while_it_is_read_counts_as_gone(monkeypatch):
+    """Linux says "no such process" when a process ends between finding its file and reading it."""
+
+    def ended(*_args, **_kwargs):
+        raise ProcessLookupError(3, "No such process")
+
+    monkeypatch.setattr(pathlib.Path, "read_text", ended)
+    assert _gone(os.getpid(), 1)
 
 
 def _kill_if_ours(pid, mark):
@@ -517,11 +527,24 @@ def _kill_if_ours(pid, mark):
     """
     try:
         command = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return
     if mark.encode() in command:
         with contextlib.suppress(ProcessLookupError):
             os.kill(pid, signal.SIGKILL)
+
+
+def test_a_process_that_ends_while_its_command_is_read_is_left_alone(monkeypatch):
+    """The same "no such process" can come while the command line is read; there is then nothing to end."""
+    killed = []
+
+    def ended(*_args, **_kwargs):
+        raise ProcessLookupError(3, "No such process")
+
+    monkeypatch.setattr(pathlib.Path, "read_bytes", ended)
+    monkeypatch.setattr(os, "kill", lambda *args: killed.append(args))
+    _kill_if_ours(os.getpid(), "anything")
+    assert killed == []
 
 
 def _count_stops(tmp_path, *, muted=False, guard=30):
