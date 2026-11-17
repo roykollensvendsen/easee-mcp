@@ -167,8 +167,13 @@ def restore(path: pathlib.Path, original: str, mutated: str) -> bool:
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
-def run_suite() -> tuple[int, list[str]]:
-    """Run the tests and give back how many failed, and which ones."""
+def run_suite(timeout: float | None = None) -> tuple[int, list[str]]:
+    """Run the tests and give back how many failed, and which ones.
+
+    A real run is never given a time limit, by Roy's rule: a slow suite is still measured
+    to its end. Only a test's small scratch run passes `timeout`, so that a hang there is
+    that test's failure instead of a run that never ends.
+    """
     # Two mutations that replace equal-length text leave files of identical
     # size, and CPython validates a cached .pyc from the source's modification
     # time and size -- both at one-second resolution. Inside the same second
@@ -183,6 +188,8 @@ def run_suite() -> tuple[int, list[str]]:
         cwd=ROOT,
         check=False,
         env=env,
+        # RULE: a real mutation run puts no time limit on the suite
+        timeout=timeout,
     )
     # --color=no covers the usual run; stripping covers a configuration that
     # turns colour back on, which would otherwise make every kill unattributable.

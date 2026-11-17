@@ -18,6 +18,7 @@ import textwrap
 import time
 
 import pytest
+from bounded import WITHIN, run_bounded
 
 ROOT = pathlib.Path(__file__).parent.parent
 
@@ -291,12 +292,10 @@ STOPPED_WHILE_MEASURING = textwrap.dedent(
 def _stop_while_measuring(tmp_path, signum):
     temp = tmp_path / "temp"
     temp.mkdir()
-    done = subprocess.run(
+    done = run_bounded(
         [sys.executable, "-c", STOPPED_WHILE_MEASURING, str(ROOT / "scripts/ratchet.py"), str(int(signum))],
         env={**os.environ, "TMPDIR": str(temp)},
-        capture_output=True,
         text=True,
-        check=False,
     )
     return done, sorted(p.name for p in temp.rglob("*"))
 
@@ -367,13 +366,13 @@ def _ratchet_stopped_in_a_step(tmp_path):
         stderr=subprocess.PIPE,
         text=True,
     ) as ratchet:
-        with fifo.open() as told:
-            pid, own_session = told.read().split()
+        pid = ratchet.pid  # until the step says its own
         try:
+            pid, own_session = _ready(fifo, WITHIN).split()
             ratchet.send_signal(signal.SIGTERM)
-            out, err = ratchet.communicate(timeout=30)
+            out, err = ratchet.communicate(timeout=WITHIN)
         finally:
-            for each in (int(pid), ratchet.pid):
+            for each in {int(pid), ratchet.pid}:
                 with contextlib.suppress(ProcessLookupError):
                     os.kill(each, signal.SIGKILL)
     return own_session == "True", ratchet.returncode, out.strip(), marker, err
@@ -573,7 +572,7 @@ def _ready(fifo, seconds):
     pytest.fail(f"the step never said it was ready within {seconds} s")
 
 
-def _count_stops(tmp_path, *, muted=False, guard=30, ready=10):
+def _count_stops(tmp_path, *, muted=False, guard=WITHIN, ready=WITHIN):
     """Stop a ratchet running COUNTS_STOPS under uv; the count, whether the step and uv ended, and stderr."""
     fifo, counted = tmp_path / "told", tmp_path / "counted"
     os.mkfifo(fifo)
@@ -608,7 +607,7 @@ def _count_stops(tmp_path, *, muted=False, guard=30, ready=10):
             ratchet.kill()
             for pid in pids:
                 _kill_if_ours(pid, str(fifo))
-    ended = all(_gone(pid, 10) for pid in pids)
+    ended = all(_gone(pid, WITHIN) for pid in pids)
     return (counted.read_text() if counted.exists() else None), ended, err
 
 
@@ -698,7 +697,7 @@ def test_without_uv_the_count_is_skipped_here_and_fails_in_ci(monkeypatch):
         _needs_uv()
 
 
-def _started(process, arguments, seconds=5):
+def _started(process, arguments, seconds=WITHIN):
     """Wait until `/proc` shows `process` running `arguments`.
 
     Popen can return while the new program's command line still reads as empty, measured
@@ -721,7 +720,7 @@ def test_the_count_kills_only_a_process_that_is_still_its_own(tmp_path):
             _started(ours, [*waits, mark])
             _kill_if_ours(stranger.pid, mark)
             _kill_if_ours(ours.pid, mark)
-            assert ours.wait(timeout=5) == -signal.SIGKILL
+            assert ours.wait(timeout=WITHIN) == -signal.SIGKILL
             assert stranger.poll() is None
         finally:
             stranger.kill()
