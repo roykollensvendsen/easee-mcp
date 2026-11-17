@@ -13,6 +13,10 @@ cd easee-mcp
 uv sync --all-extras
 ```
 
+Every new `git worktree` needs the same `uv sync` before its first `uv run`.
+Without it the worktree has no test tools of its own, and `uv run pytest`
+quietly finds a pytest from somewhere else, which cannot import this package.
+
 The commit linter is a separate binary,
 [committed](https://github.com/crate-ci/committed).
 
