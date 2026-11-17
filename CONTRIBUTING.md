@@ -77,6 +77,13 @@ way to learn that the gates are not a ritual performed once.
    Do not edit the tree while it runs. It refuses to restore a file that
    changed underneath it and says so, but the run it was in the middle of is
    then about a tree that no longer exists.
+
+   A mutation run has no time limit, so a test that waits for ever holds the
+   whole run for ever. Every wait in a test is bounded by the test itself:
+   a program it runs to the end goes through `run_bounded` in
+   `tests/bounded.py`, which kills the program and all it started if it
+   overruns, and a line from one still running is read with `line_within`.
+   The bound is `WITHIN`, 300 seconds, and running out fails that test.
 4. **Write the smallest code that turns it green**, then refactor with the
    suite green.
 5. **Open one pull request per change**, with the template's checklist

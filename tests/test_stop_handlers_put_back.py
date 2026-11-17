@@ -7,8 +7,9 @@ after. Proven here in a scratch run guarded by this repository's conftest.
 """
 
 import pathlib
-import subprocess
 import sys
+
+from bounded import run_bounded
 
 ROOT = pathlib.Path(__file__).parent.parent
 
@@ -33,12 +34,10 @@ def test_tests_leave_the_stop_handlers_as_they_found_them(tmp_path):
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests/conftest.py").write_text((ROOT / "tests/conftest.py").read_text(encoding="utf-8"))
     (tmp_path / "tests/test_scratch.py").write_text(TWO_TESTS)
-    done = subprocess.run(
+    done = run_bounded(
         [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "--rootdir", str(tmp_path), "tests"],
         cwd=tmp_path,
-        capture_output=True,
         text=True,
-        check=False,
     )
     assert done.returncode == 0, done.stdout
     assert "2 passed" in done.stdout

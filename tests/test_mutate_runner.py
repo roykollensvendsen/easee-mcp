@@ -21,6 +21,7 @@ import sys
 import textwrap
 
 import pytest
+from bounded import WITHIN, line_within
 
 ROOT = pathlib.Path(__file__).parent.parent
 
@@ -61,6 +62,15 @@ def test_two_mutations_never_share_a_bytecode_cache(monkeypatch, mutate):
     asked = _suite_says(monkeypatch, mutate, "1 passed\n", returncode=0)
     mutate.run_suite()
     assert asked["env"]["PYTHONDONTWRITEBYTECODE"] == "1"
+
+
+def test_a_real_mutation_run_puts_no_time_limit_on_the_suite(monkeypatch, mutate):
+    """A slow suite is measured to its end; only a test's scratch run is given a bound."""
+    asked = _suite_says(monkeypatch, mutate, "1 passed\n", returncode=0)
+    mutate.run_suite()
+    assert asked["timeout"] is None
+    mutate.run_suite(timeout=WITHIN)
+    assert asked["timeout"] == WITHIN
 
 
 def test_a_coloured_failure_line_is_still_attributed(monkeypatch, mutate):
@@ -326,14 +336,18 @@ def _stop_mid_mutation(tmp_path, *stops):
         stderr=subprocess.PIPE,
         text=True,
     ) as run:
-        assert run.stdout.readline() == "testing  a rule\n"
-        assert run.stdout.readline() == "measuring\n"
-        assert source.read_text() == "x = 2\n"
-        run.send_signal(stops[0])
-        began = run.stdout.readline()
-        for each in stops[1:]:
-            run.send_signal(each)
-        _, err = run.communicate("\n")
+        try:
+            assert line_within(run.stdout) == "testing  a rule\n"
+            assert line_within(run.stdout) == "measuring\n"
+            assert source.read_text() == "x = 2\n"
+            run.send_signal(stops[0])
+            began = line_within(run.stdout)
+            for each in stops[1:]:
+                run.send_signal(each)
+            _, err = run.communicate("\n", timeout=WITHIN)
+        finally:
+            if run.poll() is None:  # a run that never answered; leaving the block would wait on it
+                run.kill()
     return began, source.read_text(), (root / "scripts/.mutate-recovery.json").exists(), err
 
 
