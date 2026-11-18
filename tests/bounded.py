@@ -6,6 +6,7 @@ itself, and running out of it fails that one test, which is how a mutant that ha
 as caught. The bound is generous, so that it only ever fires on a real hang.
 """
 
+import contextlib
 import os
 import queue
 import signal
@@ -36,7 +37,8 @@ def run_bounded(command, within=WITHIN, *, check=False, input=None, **kwargs):  
         try:
             out, err = child.communicate(input, timeout=within)
         except subprocess.TimeoutExpired:
-            os.killpg(child.pid, signal.SIGKILL)
+            with contextlib.suppress(ProcessLookupError):  # the group may end just as time runs out
+                os.killpg(child.pid, signal.SIGKILL)
             out, err = child.communicate()
             pytest.fail(
                 f"{command} was still running after {within} s, so it and its group were killed.\n"
