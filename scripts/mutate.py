@@ -33,6 +33,7 @@ import re
 import signal
 import subprocess
 import sys
+import time
 import tomllib
 from typing import Any
 
@@ -345,7 +346,12 @@ def _run(args: argparse.Namespace) -> int:
             # run that hangs would otherwise leave no word of which rule it hung on.
             # RULE: a mutation run names each rule before it tests it
             print(f"testing  {rule['name']}", flush=True)  # noqa: T201
+            began = time.monotonic()
             count, failed = run_suite()
+            # A rule that takes far longer than the rest is one to look at, and a slow run
+            # shows here which rules made it slow.
+            # RULE: a mutation run says how long each rule took
+            took = time.monotonic() - began
             if not restore(path, text, mutated):
                 lost.append(rule["file"])
             standing = None
@@ -355,7 +361,7 @@ def _run(args: argparse.Namespace) -> int:
             by_its_own = own in failed
             results.append((rule["name"], count, own, by_its_own))
             verdict = "KILLED  " if by_its_own else ("BY LUCK " if count else "SURVIVED")
-            print(f"{verdict} {rule['name']}: {count}", flush=True)  # noqa: T201
+            print(f"{verdict} {rule['name']}: {count} in {took:.0f} s", flush=True)  # noqa: T201
     finally:
         if standing is not None:
             restore(*standing)
