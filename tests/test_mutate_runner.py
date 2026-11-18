@@ -19,6 +19,7 @@ import signal
 import subprocess
 import sys
 import textwrap
+import types
 
 import pytest
 from bounded import WITHIN, line_within
@@ -283,6 +284,17 @@ def test_a_mutation_run_names_each_rule_before_it_tests_it(tmp_path, monkeypatch
     monkeypatch.setattr(mutate, "run_suite", lambda: seen.append(pipe.shown) or (1, ["test_a_rule"]))
     mutate.main()
     assert "a rule" in seen[0]
+
+
+def test_a_mutation_run_says_how_long_each_rule_took(tmp_path, monkeypatch, mutate, capsys):
+    """Each result line ends with the seconds its suite took, so a slow rule stands out."""
+    root, _ = _one_rule(tmp_path)
+    _point_at(monkeypatch, mutate, root)
+    monkeypatch.setattr(mutate, "check_the_package", lambda: None)
+    clock = iter([10.0, 52.4])
+    monkeypatch.setattr(mutate, "time", types.SimpleNamespace(monotonic=lambda: next(clock)))
+    mutate.main()
+    assert "KILLED   a rule: 1 in 42 s\n" in capsys.readouterr().out
 
 
 def test_a_repair_only_run_only_repairs(tmp_path, monkeypatch, mutate):
