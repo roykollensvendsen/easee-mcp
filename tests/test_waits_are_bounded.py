@@ -90,3 +90,16 @@ def test_two_lines_written_at_once_are_both_read():
             assert line_within(child.stdout) == "two\n"
         finally:
             child.kill()
+
+
+def test_a_group_gone_as_the_bound_runs_out_still_fails_cleanly(monkeypatch):
+    """The group can end between the bound running out and the kill; that is still a clean failure."""
+    real_killpg = os.killpg
+
+    def gone_first(pid, sig):
+        real_killpg(pid, sig)
+        raise ProcessLookupError
+
+    monkeypatch.setattr("bounded.os.killpg", gone_first)
+    with pytest.raises(pytest.fail.Exception, match="was still running after"):
+        run_bounded([sys.executable, "-c", "import time; time.sleep(30)"], within=0.2)
