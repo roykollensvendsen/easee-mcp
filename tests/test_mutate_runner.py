@@ -12,6 +12,7 @@ asked to do, so a test here never mutates anything.
 
 import fcntl
 import importlib.util
+import itertools
 import json
 import os
 import pathlib
@@ -291,7 +292,7 @@ def test_a_mutation_run_says_how_long_each_rule_took(tmp_path, monkeypatch, muta
     root, _ = _one_rule(tmp_path)
     _point_at(monkeypatch, mutate, root)
     monkeypatch.setattr(mutate, "check_the_package", lambda: None)
-    clock = iter([10.0, 52.4])
+    clock = itertools.chain([10.0], itertools.repeat(52.4))  # a further reading gets a clear assert
     monkeypatch.setattr(mutate, "time", types.SimpleNamespace(monotonic=lambda: next(clock)))
     mutate.main()
     assert "KILLED   a rule: 1 in 42 s\n" in capsys.readouterr().out
