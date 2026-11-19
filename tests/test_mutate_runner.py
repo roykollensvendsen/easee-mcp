@@ -298,6 +298,22 @@ def test_a_mutation_run_says_how_long_each_rule_took(tmp_path, monkeypatch, muta
     assert "KILLED   a rule: 1 in 42 s\n" in capsys.readouterr().out
 
 
+def test_a_row_that_breaks_the_code_is_reported_as_broken(tmp_path, monkeypatch, mutate, capsys):
+    """A replacement that does not compile fails every test, which would pass for a kill."""
+    root, source = _one_rule(tmp_path)
+    (root / "scripts/mutations/src/pkg/core.py/a-rule.toml").write_text(
+        '[[rule]]\nname = "a rule"\nfile = "src/pkg/core.py"\nfind = "x = 1"\nreplace = "x = ("\n'
+    )
+    suites = _point_at(monkeypatch, mutate, root)
+    monkeypatch.setattr(mutate, "check_the_package", lambda: None)
+    assert mutate.main() == 1
+    out = capsys.readouterr().out
+    assert "BROKEN   a rule: the replacement is not valid code" in out
+    assert "KILLED" not in out
+    assert suites == []
+    assert source.read_text() == "x = 1\n"
+
+
 def test_a_repair_only_run_only_repairs(tmp_path, monkeypatch, mutate):
     root, source = _one_rule(tmp_path, left_mutated=True)
     suites = _point_at(monkeypatch, mutate, root, "--repair-only")
