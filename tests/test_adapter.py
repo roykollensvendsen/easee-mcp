@@ -7,6 +7,7 @@ import logging
 import pytest
 
 from easee_mcp.adapter import (
+    DEFAULT_WAIT,
     ChargerRef,
     CloudDownError,
     EaseeReader,
@@ -136,6 +137,36 @@ def test_a_cloud_that_cannot_be_reached_is_said_as_down():
     reader = EaseeReader(lambda: (FAKE_USER, FAKE_PASSWORD), session=Broken())
     with pytest.raises(CloudDownError):
         _run(_with(reader, lambda r: r.chargers()))
+
+
+def test_a_server_failure_is_said_as_down():
+    """On this read a 500 comes back from pyeasee as None, not as an error."""
+    cloud = FakeEaseeCloud()
+    cloud.fail_observations = True
+    with pytest.raises(CloudDownError):
+        _run(_with(_reader(cloud), lambda r: r.state(FAKE_CHARGER_ID)))
+
+
+def test_a_charger_not_on_the_account_is_said_as_down():
+    cloud = FakeEaseeCloud()
+    with pytest.raises(CloudDownError):
+        _run(_with(_reader(cloud), lambda r: r.state("not-" + FAKE_CHARGER_ID)))
+
+
+def test_a_wait_given_as_a_date_is_said_as_the_usual_wait():
+    """Retry-After may be a date instead of seconds; the usual wait is said then."""
+    cloud = FakeEaseeCloud(retry_after="Thu, 19 Nov 2026 07:30:00 GMT")
+    with pytest.raises(SlowDownError) as raised:
+        _run(_with(_reader(cloud), lambda r: r.state(FAKE_CHARGER_ID)))
+    assert raised.value.seconds == DEFAULT_WAIT
+
+
+def test_a_value_that_is_not_a_number_is_read_as_unknown():
+    cloud = FakeEaseeCloud()
+    cloud.observations |= {109: "charging", 120: "n/a"}
+    state = _run(_with(_reader(cloud), lambda r: r.state(FAKE_CHARGER_ID)))
+    assert (state.op_mode, state.power_kw) == (None, None)
+    assert state.session_kwh == 12.4
 
 
 def test_an_expired_token_logs_in_again_and_reads():

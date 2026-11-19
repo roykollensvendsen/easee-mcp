@@ -96,8 +96,11 @@ class FakeEaseeCloud:
     energy_kwh: float = 42.5
     #: True answers the observations read with 403.
     forbid_observations: bool = False
-    #: Set to a number of seconds to answer every read with 429.
-    retry_after: int | None = None
+    #: True answers the observations read with 500, as a server failure does.
+    fail_observations: bool = False
+    #: Set to a number of seconds to answer every read with 429. A string is sent
+    #: as it is, since the header may also be a date.
+    retry_after: int | str | None = None
     #: Each request as (method, path).
     requests: list[tuple[str, str]] = field(default_factory=list)
     refused: list[tuple[str, str]] = field(default_factory=list)
@@ -172,7 +175,7 @@ class FakeEaseeCloud:
         return None
 
     @staticmethod
-    def _slow_down(seconds: int) -> FakeResponse:
+    def _slow_down(seconds: int | str) -> FakeResponse:
         headers = _json_headers()
         headers["Retry-After"] = str(seconds)
         return FakeResponse(429, {"title": "Too many requests"}, headers)
@@ -181,8 +184,6 @@ class FakeEaseeCloud:
         if path == "/api/chargers":
             return FakeResponse(200, [_charger_record()], _json_headers())
         if path == f"/state/{FAKE_CHARGER_ID}/observations":
-            if self.forbid_observations:
-                return FakeResponse(403, {"title": "Forbidden"}, _json_headers())
             return self._observed(query)
         if path.startswith(f"/api/sessions/charger/{FAKE_CHARGER_ID}/sessions/"):
             return FakeResponse(200, self._session_records(), _json_headers())
@@ -191,6 +192,10 @@ class FakeEaseeCloud:
         return FakeResponse(404, {"title": "Not found"}, _json_headers())
 
     def _observed(self, query: str) -> FakeResponse:
+        if self.forbid_observations:
+            return FakeResponse(403, {"title": "Forbidden"}, _json_headers())
+        if self.fail_observations:
+            return FakeResponse(500, {"title": "Internal Server Error"}, _json_headers())
         asked = {int(i) for i in parse_qs(query).get("ids", [""])[0].split(",") if i}
         found = [
             {"id": key, "value": value, "timestamp": self.now().isoformat()}
