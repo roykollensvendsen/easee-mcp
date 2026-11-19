@@ -31,7 +31,9 @@ def started_by_pull_request(workflow: str) -> bool:
 
 PULL_REQUEST_WORKFLOWS = [w for w in WORKFLOWS if started_by_pull_request(w.read_text())]
 
-GROUP = "group: ${{ github.workflow }}-${{ github.ref }}"
+# A pull request's runs share its ref's group; every other run is a group of its own.
+KEY = "${{ github.event_name == 'pull_request' && github.ref || github.run_id }}"
+GROUP = "group: ${{ github.workflow }}-" + KEY
 CANCEL = "cancel-in-progress: ${{ github.event_name == 'pull_request' }}"
 
 
@@ -76,8 +78,17 @@ def test_the_walk_finds_the_pull_request_workflow():
     assert [w.name for w in PULL_REQUEST_WORKFLOWS] == ["checks.yml"]
 
 
+def cancels_only_pull_request_runs(block: str) -> bool:
+    """Whether a concurrency block stops only stale pull-request runs and lets every other run end."""
+    return GROUP in block and CANCEL in block
+
+
+def test_one_group_per_ref_for_every_run_is_refused():
+    """With one group per ref, GitHub keeps one waiting run, and a main commit between two gets none."""
+    old = "  group: ${{ github.workflow }}-${{ github.ref }}\n  " + CANCEL + "\n"
+    assert not cancels_only_pull_request_runs(old)
+
+
 @pytest.mark.parametrize("workflow", PULL_REQUEST_WORKFLOWS, ids=lambda w: w.name)
 def test_a_pull_request_workflow_cancels_only_pull_request_runs(workflow):
-    block = concurrency_block(workflow.read_text())
-    assert GROUP in block
-    assert CANCEL in block
+    assert cancels_only_pull_request_runs(concurrency_block(workflow.read_text()))
