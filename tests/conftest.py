@@ -59,10 +59,15 @@ def _open_up(place: pathlib.Path) -> None:
         place.chmod(place.stat().st_mode | stat.S_IRWXU)
 
 
-def _writable_again(func: Callable[[str], object], path: str, _exc: object) -> None:
+def _writable_again(func: Callable[[str], object], path: str, exc: BaseException) -> None:
+    # Two runs may sweep the same dead folder at once, and the slower one finds parts of it,
+    # or all of it, already gone. That is passed over, never a failure.
+    if isinstance(exc, FileNotFoundError):
+        return
     for place in (pathlib.Path(path).parent, pathlib.Path(path)):
         _open_up(place)
-    func(path)
+    with contextlib.suppress(FileNotFoundError):
+        func(path)
 
 
 def remove(folder: pathlib.Path) -> None:
