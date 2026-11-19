@@ -298,6 +298,12 @@ def test_a_mutation_run_says_how_long_each_rule_took(tmp_path, monkeypatch, muta
     assert "KILLED   a rule: 1 in 42 s\n" in capsys.readouterr().out
 
 
+def test_the_evidence_page_names_every_broken_row(mutate):
+    """The page CI keeps must not show a run with a broken row as simply having fewer rules."""
+    page = mutate.report([("a rule", 1, "test_a_rule", True)], [], [], ["another rule"])
+    assert "Broken rows, so not tested: another rule." in page
+
+
 def test_a_row_that_breaks_the_code_is_reported_as_broken(tmp_path, monkeypatch, mutate, capsys):
     """A replacement that does not compile fails every test, which would pass for a kill."""
     root, source = _one_rule(tmp_path)
