@@ -1,0 +1,5 @@
+[[rule]]
+name = "a narrower refusal from pyeasee is still said as that refusal"
+file = "src/easee_mcp/adapter.py"
+find = 'if isinstance\(refused, theirs\)\)'
+replace = 'if type(refused) is theirs)'

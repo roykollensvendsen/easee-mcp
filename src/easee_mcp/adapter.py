@@ -251,13 +251,19 @@ class EaseeReader:
                     raise LoginRefusedError from None
                 continue
             except (exceptions.ForbiddenServiceException, exceptions.NotFoundException) as refused:
-                raise REFUSALS[type(refused)] from None
+                raise _ours(refused) from None
             except Exception:  # noqa: BLE001 - whatever broke, the voice can only say the cloud is down
                 raise CloudDownError from None
             if answer is None:  # pyeasee's reads answer None on a server failure
                 raise CloudDownError
             return answer
         raise LoginRefusedError  # pragma: no cover - the loop always returns or raises
+
+
+def _ours(refused: Exception) -> type[Exception]:
+    """Our error for one of Easee's refusals, a narrower one from a later pyeasee included."""
+    # RULE: a narrower refusal from pyeasee is still said as that refusal
+    return next(ours for theirs, ours in REFUSALS.items() if isinstance(refused, theirs))
 
 
 def _wait(slow: Exception) -> int:
