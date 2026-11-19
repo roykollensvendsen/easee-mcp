@@ -1,0 +1,5 @@
+[[rule]]
+name = "a charger that left the account is said as gone"
+file = "src/easee_mcp/cache.py"
+find = 'if all\(c.id != charger.id for c in found\):'
+replace = 'if False:'

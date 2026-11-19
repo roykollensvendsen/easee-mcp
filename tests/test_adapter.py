@@ -13,6 +13,7 @@ from easee_mcp.adapter import (
     EaseeReader,
     LoginRefusedError,
     NotAllowedError,
+    NotFoundError,
     SlowDownError,
     mask,
 )
@@ -147,9 +148,10 @@ def test_a_server_failure_is_said_as_down():
         _run(_with(_reader(cloud), lambda r: r.state(FAKE_CHARGER_ID)))
 
 
-def test_a_charger_not_on_the_account_is_said_as_down():
+def test_a_charger_this_reader_never_listed_is_not_found():
+    """The cache then lists the chargers again and says the charger is gone."""
     cloud = FakeEaseeCloud()
-    with pytest.raises(CloudDownError):
+    with pytest.raises(NotFoundError):
         _run(_with(_reader(cloud), lambda r: r.state("not-" + FAKE_CHARGER_ID)))
 
 

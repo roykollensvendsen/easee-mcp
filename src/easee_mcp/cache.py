@@ -8,7 +8,9 @@ voice can ask "is it charging?" every few seconds, so:
 * the state and limits are kept thirty seconds;
 * sessions are kept ten minutes, and energy thirty;
 * past a limit, or while Easee's Retry-After runs, nothing is sent: the last
-  answer is given with its age, or the wait is said.
+  answer is given with its age, or the wait is said;
+* a read Easee refuses lists the chargers once more, so a charger that has left
+  the account is said as gone, and nothing kept from it is given again.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ import datetime as dt
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from easee_mcp.adapter import SlowDownError
+from easee_mcp.adapter import ChargerGoneError, NotAllowedError, NotFoundError, SlowDownError
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -70,10 +72,9 @@ class CachedCharger:
     async def which(self) -> ChargerRef:
         """The charger on the account, read once."""
         if self._charger is None:
-            found = await self._ask("chargers", self._reader.chargers)
-            if not found:
+            self._charger = _first(await self._ask("chargers", self._reader.chargers))
+            if self._charger is None:
                 raise LookupError
-            self._charger = found[0]
         return self._charger
 
     async def reading(self) -> Snapshot:
@@ -81,7 +82,7 @@ class CachedCharger:
         charger = await self.which()
         # RULE: the state is read at most every thirty seconds
         got = await self._kept_for(
-            "reading", STATE_SECONDS, "state", lambda: self._reader.reading(charger.id)
+            "reading", STATE_SECONDS, "state", lambda: self._of(charger, self._reader.reading)
         )
         return Snapshot(state=got.value.state, limits=got.value.limits, age_seconds=got.age_seconds)
 
@@ -94,7 +95,7 @@ class CachedCharger:
             f"sessions:{days}",
             SESSIONS_SECONDS,
             "sessions",
-            lambda: self._reader.sessions(charger.id, start, end),
+            lambda: self._of(charger, lambda i: self._reader.sessions(i, start, end)),
         )
 
     async def energy(self, period: str) -> Aged[float]:
@@ -106,7 +107,7 @@ class CachedCharger:
             f"energy:{period}",
             ENERGY_SECONDS,
             "energy",
-            lambda: self._reader.energy(charger.id, start, end),
+            lambda: self._of(charger, lambda i: self._reader.energy(i, start, end)),
         )
 
     def calls_left_hour(self) -> int:
@@ -116,6 +117,32 @@ class CachedCharger:
     async def close(self) -> None:
         """Close the connection to Easee."""
         await self._reader.close()
+
+    async def _of[T](self, charger: ChargerRef, read: Callable[[str], Awaitable[T]]) -> T:
+        """Read ``charger``; when Easee refuses, list the chargers once to learn whether it left."""
+        try:
+            return await read(charger.id)
+        except (NotAllowedError, NotFoundError):
+            # RULE: a refusal is never said as a wait of our own making
+            if self._may("chargers"):  # else only Easee's own 429 could say wait
+                await self._unless_gone(charger)
+            raise
+
+    async def _unless_gone(self, charger: ChargerRef) -> None:
+        """List the chargers once, and raise ChargerGoneError if ``charger`` is not among them."""
+        try:
+            found = await self._ask("chargers", self._reader.chargers)
+        except SlowDownError:
+            raise  # Easee's 429: said as the wait, and never retried here
+        except Exception:  # noqa: BLE001 - the list failing tells nothing; the refusal stands
+            return
+        # RULE: a charger that left the account is said as gone
+        if all(c.id != charger.id for c in found):
+            # The list just read picks the next charger by the rule which() uses,
+            # so the next question needs no third list within Easee's minute.
+            self._charger = _first(found)
+            self._kept.clear()
+            raise ChargerGoneError(tuple(c.name for c in found)) from None
 
     async def _kept_for[T](
         self, key: str, seconds: int, limit: str, read: Callable[[], Awaitable[T]]
@@ -152,6 +179,11 @@ class CachedCharger:
             self._until[limit] = now + dt.timedelta(seconds=slow.seconds)
             raise
 
+    def _may(self, limit: str) -> bool:
+        """Whether a call to ``limit`` would be sent now, rather than told to wait."""
+        until = self._until.get(limit)
+        return (until is None or self._now() >= until) and self._left(limit) > 0
+
     def _recent(self, limit: str) -> list[dt.datetime]:
         _, period = LIMITS[limit]
         since = self._now() - dt.timedelta(seconds=period)
@@ -159,6 +191,11 @@ class CachedCharger:
 
     def _left(self, limit: str) -> int:
         return max(0, LIMITS[limit][0] - len(self._recent(limit)))
+
+
+def _first(found: list[ChargerRef]) -> ChargerRef | None:
+    """The charger to read from a list of the account's: the first, as no choice is made yet."""
+    return found[0] if found else None
 
 
 def period_start(now: dt.datetime, period: str) -> dt.datetime:

@@ -5,7 +5,7 @@ import datetime as dt
 
 import pytest
 
-from easee_mcp.adapter import EaseeReader, SlowDownError
+from easee_mcp.adapter import ChargerGoneError, EaseeReader, NotAllowedError, SlowDownError
 from easee_mcp.cache import CachedCharger
 from easee_mcp.fake import FAKE_PASSWORD, FAKE_USER, FakeEaseeCloud
 
@@ -143,3 +143,88 @@ def test_the_calls_left_this_hour_are_counted(cloud, clock):
     assert charger.calls_left_hour() == 9
     _run(charger, lambda c: c.energy("week"), lambda c: c.energy("month"))
     assert charger.calls_left_hour() == 8  # the tighter of the two hourly limits
+
+
+ELSEWHERE = ("EHTEST02", "Charger B")
+READS = {
+    "reading": lambda c: c.reading(),
+    "sessions": lambda c: c.sessions(days=7),
+    "energy": lambda c: c.energy("day"),
+}
+
+
+def _leaves(cloud, *, refused_with=403, now_there=(ELSEWHERE,)):
+    cloud.chargers = list(now_there)
+    cloud.gone_status = refused_with
+
+
+@pytest.mark.parametrize("refused_with", [403, 404])
+@pytest.mark.parametrize("read", READS)
+def test_a_charger_that_left_the_account_is_said_as_gone(cloud, clock, read, refused_with):
+    async def after_it_leaves(charger):
+        await charger.which()
+        _leaves(cloud, refused_with=refused_with)
+        return await READS[read](charger)
+
+    with pytest.raises(ChargerGoneError) as gone:
+        _run(_charger(cloud, clock), after_it_leaves)
+    assert gone.value.names == ("Charger B",)
+    assert _gets(cloud, "/api/chargers") == 2
+
+
+def test_a_refused_charger_still_on_the_account_keeps_its_refusal(cloud, clock):
+    cloud.forbid_observations = True
+    with pytest.raises(NotAllowedError):
+        _run(_charger(cloud, clock), lambda c: c.reading())
+    assert _gets(cloud, "/api/chargers") == 2
+
+
+def test_a_charger_list_easee_limits_after_a_refusal_says_wait_once(cloud, clock):
+    async def after_it_leaves(charger):
+        await charger.which()
+        _leaves(cloud)
+        cloud.list_status = 429
+        return await charger.reading()
+
+    with pytest.raises(SlowDownError):
+        _run(_charger(cloud, clock), after_it_leaves)
+    assert _gets(cloud, "/api/chargers") == 2
+
+
+def test_a_charger_list_that_fails_after_a_refusal_keeps_the_refusal(cloud, clock):
+    async def after_it_leaves(charger):
+        await charger.which()
+        _leaves(cloud)
+        cloud.list_status = 500
+        return await charger.reading()
+
+    with pytest.raises(NotAllowedError):
+        _run(_charger(cloud, clock), after_it_leaves)
+    assert _gets(cloud, "/api/chargers") == 2
+
+
+def test_after_a_charger_leaves_nothing_kept_from_it_is_given(cloud, clock):
+    async def before_and_after(charger):
+        await charger.sessions(days=7)  # kept ten minutes
+        clock.tick(31)
+        _leaves(cloud)
+        with pytest.raises(ChargerGoneError):
+            await charger.reading()
+        return await charger.which(), await charger.sessions(days=7)
+
+    [(now_used, again)] = _run(_charger(cloud, clock), before_and_after)
+    assert now_used.name == "Charger B"
+    assert again.age_seconds == 0
+    assert _gets(cloud, "/sessions/") == 2
+
+
+def test_a_refusal_is_never_said_as_a_wait_of_our_own_making(cloud, clock):
+    cloud.forbid_observations = True
+
+    async def twice(charger):
+        for _ in range(2):
+            with pytest.raises(NotAllowedError):
+                await charger.reading()
+
+    _run(_charger(cloud, clock), twice)
+    assert _gets(cloud, "/api/chargers") == 2
