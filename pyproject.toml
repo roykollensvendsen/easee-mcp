@@ -62,6 +62,10 @@ warn_unused_configs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# pytest keeps a failed run's folders for reading, and only the last run's. Never "none" or 0:
+# those sweep the shared pytest-of-<user>, other sessions' running tests included.
+tmp_path_retention_policy = "failed"
+tmp_path_retention_count = 1
 
 [tool.coverage.run]
 branch = true
