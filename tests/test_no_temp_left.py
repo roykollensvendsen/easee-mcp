@@ -255,3 +255,18 @@ def test_a_folder_another_sweep_removes_while_this_one_does_is_passed_over(tmp_p
     monkeypatch.setattr(conftest.fcntl, "flock", flock_then_the_other_sweep_removes_it)
     conftest.sweep_dead_runs(tmp_path)  # passes over it, rather than fail the run
     assert not dead.exists()
+
+
+def test_nothing_sets_pytest_to_sweep_the_shared_folder():
+    """A policy of "none", or a count of 0, sweeps other sessions' running tests away.
+
+    pytest then removes every numbered folder in the shared pytest-of-<user>.
+    """
+    for name in ("pyproject.toml", "tests/conftest.py"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert 'tmp_path_retention_policy = "none"' not in text, name
+        assert "tmp_path_retention_count = 0" not in text, name
+        assert "pytest-of-" not in text.replace("pytest-of-<user>", ""), name
+    settings = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'tmp_path_retention_policy = "failed"' in settings
+    assert "tmp_path_retention_count = 1" in settings
