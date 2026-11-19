@@ -1,5 +1,5 @@
 [[rule]]
 name = "a narrower refusal from pyeasee is still said as that refusal"
 file = "src/easee_mcp/adapter.py"
-find = 'if isinstance\(refused, theirs\)\)'
-replace = 'if type(refused) is theirs)'
+find = '^ {4}return next\(ours for theirs, ours in REFUSALS\.items\(\) if isinstance\(refused, theirs\)\)$'
+replace = 'return next(ours for theirs, ours in REFUSALS.items() if type(refused) is theirs)'
