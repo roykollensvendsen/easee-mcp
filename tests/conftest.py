@@ -7,6 +7,9 @@ when it ends. A killed run never gets that far, so the next run removes any such
 whose lock nobody holds. The lock, not a process number, tells a live run: a sandbox has
 process numbers of its own, and they are reused.
 
+The design is A, the starting name, in the plugin rules (R15 (a) and R17 (a)): a run's
+folder is made as `starting-…`, locked, and only then renamed to its run name.
+
 pytest's own sweep is not used for this: it works on a folder every project on the machine
 shares, and set to keep nothing it removes folders other runs are still using. Proven by
 `tests/test_no_temp_left.py`.
