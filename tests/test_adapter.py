@@ -4,6 +4,7 @@ import asyncio
 import datetime as dt
 import logging
 
+import pyeasee
 import pytest
 
 from easee_mcp.adapter import (
@@ -169,6 +170,25 @@ def test_a_value_that_is_not_a_number_is_read_as_unknown():
     state = _run(_with(_reader(cloud), lambda r: r.state(FAKE_CHARGER_ID)))
     assert (state.op_mode, state.power_kw) == (None, None)
     assert state.session_kwh == 12.4
+
+
+@pytest.mark.parametrize(
+    ("theirs", "ours", "status"),
+    [("ForbiddenServiceException", NotAllowedError, 403), ("NotFoundException", NotFoundError, 404)],
+)
+def test_a_narrower_refusal_from_pyeasee_is_still_said_as_that_refusal(monkeypatch, theirs, ours, status):
+    """A later pyeasee may raise a subclass; it must not fall through to "broke"."""
+    narrower = type("Narrower", (getattr(pyeasee.exceptions, theirs),), {})
+    monkeypatch.setattr(pyeasee.easee, theirs, narrower)
+    cloud = FakeEaseeCloud(gone_status=status)
+
+    async def after_it_leaves(reader):
+        await reader.chargers()
+        cloud.chargers = []
+        return await reader.state(FAKE_CHARGER_ID)
+
+    with pytest.raises(ours):
+        _run(_with(_reader(cloud), after_it_leaves))
 
 
 def test_an_expired_token_logs_in_again_and_reads():
