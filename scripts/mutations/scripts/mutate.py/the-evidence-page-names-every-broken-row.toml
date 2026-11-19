@@ -1,0 +1,5 @@
+[[rule]]
+name = "the evidence page names every broken row"
+file = "scripts/mutate.py"
+find = '^ {4}broken_note = f" Broken rows, so not tested: '
+replace = 'broken_note = ""'

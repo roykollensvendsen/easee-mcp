@@ -392,7 +392,7 @@ def _summary(
         print("CHANGED WHILE MUTATED, so left as they are:", ", ".join(sorted(set(lost))))  # noqa: T201
         print("Edit the tree while this runs and the result is not about your code.")  # noqa: T201
     if write:
-        write.write_text(report(results, survived, lucky))
+        write.write_text(report(results, survived, lucky, bad_rows))
     return 1 if survived or lucky or lost or bad_rows else 0
 
 
@@ -423,7 +423,9 @@ def broken(file: str, mutated: str) -> str | None:
     return None
 
 
-def report(results: list[tuple[str, int, str, bool]], survived: list[str], lucky: list[str]) -> str:
+def report(
+    results: list[tuple[str, int, str, bool]], survived: list[str], lucky: list[str], bad_rows: list[str]
+) -> str:
     """Render the run as the evidence page."""
     rows = "\n".join(
         f"| {name} | {count} | `{own}` | {'yes' if by_own else 'NO'} |"
@@ -435,6 +437,10 @@ def report(results: list[tuple[str, int, str, bool]], survived: list[str], lucky
         + (" None survived." if not survived else f" Survived: {', '.join(survived)}.")
         + ("" if not lucky else f" Killed only by other tests: {', '.join(lucky)}.")
     )
+    # A broken row has no line in the table below, so the page must say so here.
+    # RULE: the evidence page names every broken row
+    broken_note = f" Broken rows, so not tested: {', '.join(bad_rows)}." if bad_rows else ""
+    verdict += broken_note
     return f"""# Every rule, turned off in turn
 
 *Run {dt.datetime.now(dt.UTC).date()} by `python scripts/mutate.py --write
