@@ -12,6 +12,7 @@ Each test points TMPDIR at a folder of its own and looks inside it afterwards.
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -238,3 +239,19 @@ def test_a_folder_another_sweep_removed_first_is_passed_over(tmp_path, monkeypat
     monkeypatch.setattr(conftest.os, "open", open_after_the_other_sweep)
     conftest.sweep_dead_runs(tmp_path)  # passes over it, rather than fail the run
     assert not gone.exists()
+
+
+def test_a_folder_another_sweep_removes_while_this_one_does_is_passed_over(tmp_path, monkeypatch):
+    """Both sweeps may find the same dead run unlocked; the slower one finds it gone midway."""
+    import conftest  # noqa: PLC0415 - the hooks under test
+
+    dead = _run_folder(tmp_path)
+    real_flock = conftest.fcntl.flock
+
+    def flock_then_the_other_sweep_removes_it(fd, how):
+        real_flock(fd, how)
+        shutil.rmtree(dead)
+
+    monkeypatch.setattr(conftest.fcntl, "flock", flock_then_the_other_sweep_removes_it)
+    conftest.sweep_dead_runs(tmp_path)  # passes over it, rather than fail the run
+    assert not dead.exists()
