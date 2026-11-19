@@ -103,6 +103,39 @@ def test_every_tool_answers_with_a_sentence_even_when_it_fails(kind, say):
     assert answer["say"] == say
 
 
+LEFT = "That charger is no longer on the Easee account; the account has "
+
+
+@pytest.mark.parametrize(
+    ("now_there", "say"),
+    [
+        ([("EHTEST02", "Charger B")], LEFT + "Charger B."),
+        (
+            [("EHTEST02", "Charger B"), ("EHTEST03", "Charger C"), ("EHTEST04", "Charger D")],
+            LEFT + "Charger B, Charger C and Charger D.",
+        ),
+        ([], LEFT + "no chargers now."),
+    ],
+)
+def test_a_charger_that_left_the_account_is_said_by_the_names_left(now_there, say):
+    cloud = FakeEaseeCloud(now=lambda: AT)
+    server = _server(cloud)
+    _call(server, "charger_sessions")  # the charger is found while it is still there
+    cloud.chargers = now_there
+    answer = _call(server, "charger_status")
+    assert (answer["success"], answer["outcome"], answer["say"]) == (False, "charger_gone", say)
+    assert "EHTEST" not in str(answer)
+
+
+def test_the_answer_after_a_charger_leaves_names_the_one_now_used():
+    cloud = FakeEaseeCloud(now=lambda: AT)
+    server = _server(cloud)
+    _call(server, "charger_sessions")
+    cloud.chargers = [("EHTEST02", "Charger B")]
+    _call(server, "charger_status")
+    assert _call(server, "charger_status")["say"].startswith("Charger B is charging")
+
+
 def test_the_instructions_say_it_only_reads():
     assert "never starts, stops or changes" in _server().instructions
 

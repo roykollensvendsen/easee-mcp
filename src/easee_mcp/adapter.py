@@ -73,6 +73,19 @@ class CloudDownError(Exception):
     """Easee's cloud did not answer, or answered with something unreadable."""
 
 
+class NotFoundError(CloudDownError):
+    """Easee answered that what was read is not there; said as down unless the cache knows why."""
+
+
+class ChargerGoneError(Exception):
+    """The charger read is no longer on the account."""
+
+    def __init__(self, names: tuple[str, ...]) -> None:
+        """Remember the names of the chargers the account has now; never their IDs."""
+        super().__init__(names)
+        self.names = names
+
+
 class LoginRefusedError(Exception):
     """Easee refused the username or password."""
 
@@ -88,6 +101,13 @@ class SlowDownError(Exception):
         """Remember how long Easee said to wait."""
         super().__init__(seconds)
         self.seconds = seconds
+
+
+#: Easee's two refusals of a read, as the errors the cache and the voice know.
+REFUSALS: dict[type[Exception], type[Exception]] = {
+    exceptions.ForbiddenServiceException: NotAllowedError,
+    exceptions.NotFoundException: NotFoundError,
+}
 
 
 @dataclass(frozen=True)
@@ -206,7 +226,7 @@ class EaseeReader:
         if charger_id not in self._chargers:
             await self.chargers()
         if charger_id not in self._chargers:
-            raise CloudDownError
+            raise NotFoundError
         return self._chargers[charger_id]
 
     async def _call(self, read: Callable[[Any], Awaitable[Any]]) -> Any:  # noqa: ANN401
@@ -230,8 +250,8 @@ class EaseeReader:
                 if attempt:
                     raise LoginRefusedError from None
                 continue
-            except exceptions.ForbiddenServiceException:
-                raise NotAllowedError from None
+            except (exceptions.ForbiddenServiceException, exceptions.NotFoundException) as refused:
+                raise REFUSALS[type(refused)] from None
             except Exception:  # noqa: BLE001 - whatever broke, the voice can only say the cloud is down
                 raise CloudDownError from None
             if answer is None:  # pyeasee's reads answer None on a server failure

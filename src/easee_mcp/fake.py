@@ -92,6 +92,12 @@ class FakeEaseeCloud:
     observations: dict[int, Any] = field(default_factory=lambda: _observations())  # noqa: PLW0108 - defined below
     #: Each session as (connected, disconnected or None, kWh).
     sessions: list[tuple[dt.datetime, dt.datetime | None, float]] = field(default_factory=list)
+    #: The chargers on the account, as (ID, name).
+    chargers: list[tuple[str, str]] = field(default_factory=lambda: [(FAKE_CHARGER_ID, FAKE_CHARGER_NAME)])
+    #: What a read of a charger not on the account is answered with.
+    gone_status: int = 403
+    #: Set to answer the charger list with this status instead: 429 says wait a minute.
+    list_status: int | None = None
     #: The kWh a total-energy question answers.
     energy_kwh: float = 42.5
     #: True answers the observations read with 403.
@@ -182,14 +188,24 @@ class FakeEaseeCloud:
 
     def _read(self, path: str, query: str) -> FakeResponse:
         if path == "/api/chargers":
-            return FakeResponse(200, [_charger_record()], _json_headers())
-        if path == f"/state/{FAKE_CHARGER_ID}/observations":
+            return self._listed()
+        whose = _whose(path)
+        if whose is not None and whose not in {i for i, _ in self.chargers}:
+            return FakeResponse(self.gone_status, {"title": "Not yours"}, _json_headers())
+        if path == f"/state/{whose}/observations":
             return self._observed(query)
-        if path.startswith(f"/api/sessions/charger/{FAKE_CHARGER_ID}/sessions/"):
+        if path.startswith(f"/api/sessions/charger/{whose}/sessions/"):
             return FakeResponse(200, self._session_records(), _json_headers())
-        if path.startswith(f"/api/sessions/charger/{FAKE_CHARGER_ID}/total/"):
+        if path.startswith(f"/api/sessions/charger/{whose}/total/"):
             return FakeResponse(200, str(self.energy_kwh), _Headers({"Content-Type": "text/plain"}))
         return FakeResponse(404, {"title": "Not found"}, _json_headers())
+
+    def _listed(self) -> FakeResponse:
+        if self.list_status == 429:  # noqa: PLR2004 - Too Many Requests
+            return self._slow_down(60)
+        if self.list_status is not None:
+            return FakeResponse(self.list_status, {"title": "Failed"}, _json_headers())
+        return FakeResponse(200, [_charger_record(*c) for c in self.chargers], _json_headers())
 
     def _observed(self, query: str) -> FakeResponse:
         if self.forbid_observations:
@@ -260,10 +276,20 @@ def _place() -> dict[str, Any]:
     }
 
 
-def _charger_record() -> dict[str, Any]:
+def _whose(path: str) -> str | None:
+    """The charger ID a read is about, or None for a read of the account."""
+    parts = path.split("/")
+    if path.startswith("/state/") and len(parts) > 2:  # noqa: PLR2004 - /state/{id}
+        return parts[2]
+    if path.startswith("/api/sessions/charger/") and len(parts) > 4:  # noqa: PLR2004 - /api/sessions/charger/{id}
+        return parts[4]
+    return None
+
+
+def _charger_record(charger_id: str, name: str) -> dict[str, Any]:
     return {
-        "id": FAKE_CHARGER_ID,
-        "name": FAKE_CHARGER_NAME,
+        "id": charger_id,
+        "name": name,
         "productCode": 1,
         "levelOfAccess": 1,
         "userRole": 1,

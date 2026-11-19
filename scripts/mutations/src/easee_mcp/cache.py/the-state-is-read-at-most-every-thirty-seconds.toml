@@ -1,5 +1,5 @@
 [[rule]]
 name = "the state is read at most every thirty seconds"
 file = "src/easee_mcp/cache.py"
-find = '"reading", STATE_SECONDS, "state", lambda: self._reader.reading\(charger.id\)'
-replace = '"reading", 0, "state", lambda: self._reader.reading(charger.id)'
+find = '"reading", STATE_SECONDS, "state", lambda: self._of\(charger, self._reader.reading\)'
+replace = '"reading", 0, "state", lambda: self._of(charger, self._reader.reading)'

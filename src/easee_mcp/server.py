@@ -10,7 +10,15 @@ from typing import TYPE_CHECKING, Any
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
-from easee_mcp.adapter import CloudDownError, LoginRefusedError, NotAllowedError, NotSetUpError, SlowDownError
+from easee_mcp.adapter import (
+    ChargerGoneError,
+    CloudDownError,
+    LoginRefusedError,
+    NotAllowedError,
+    NotSetUpError,
+    SlowDownError,
+)
+from easee_mcp.answers import one_line
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -114,6 +122,20 @@ def build_server(
     return server
 
 
+def _said(failure: Exception) -> tuple[str, str]:
+    """The outcome and the sentence for a failure that is not a wait."""
+    if isinstance(failure, ChargerGoneError):
+        return "charger_gone", _gone(failure.names)
+    return next((said for kind, said in FAILURES if isinstance(failure, kind)), ("broke", BROKE))
+
+
+def _gone(names: tuple[str, ...]) -> str:
+    """Say the charger has left, naming those there now by the names the owner gave them."""
+    said = [one_line(n) for n in names]
+    there = " and ".join([", ".join(said[:-1]), said[-1]] if len(said) > 1 else said) or "no chargers now"
+    return f"That charger is no longer on the Easee account; the account has {there}."
+
+
 def _failed(outcome: str, say: str) -> dict[str, Any]:
     return {"success": False, "outcome": outcome, "say": say}
 
@@ -137,10 +159,7 @@ def _guarded(
                 )
                 answer["retry_after_seconds"] = slow.seconds
             except Exception as failure:  # noqa: BLE001 - whatever broke, the voice gets a sentence
-                outcome, say = next(
-                    (said for kind, said in FAILURES if isinstance(failure, kind)), ("broke", BROKE)
-                )
-                answer = _failed(outcome, say)
+                answer = _failed(*_said(failure))
             after(answer)
             answer["simulated"] = simulated
             if simulated:

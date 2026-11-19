@@ -1,0 +1,5 @@
+[[rule]]
+name = "a refusal is never said as a wait of our own making"
+file = "src/easee_mcp/cache.py"
+find = 'if self._may\("chargers"\):'
+replace = 'if True:'
