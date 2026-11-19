@@ -171,7 +171,7 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 def run_suite(timeout: float | None = None) -> tuple[int, list[str]]:
     """Run the tests and give back how many failed, and which ones.
 
-    A real run is never given a time limit, by Roy's rule: a slow suite is still measured
+    A real run is never given a time limit, by the owner's rule: a slow suite is still measured
     to its end. Only a test's small scratch run passes `timeout`, so that a hang there is
     that test's failure instead of a run that never ends.
     """
